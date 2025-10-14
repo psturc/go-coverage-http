@@ -1,3 +1,4 @@
+[![codecov](https://codecov.io/gh/psturc/go-coverage-http/branch/main/graph/badge.svg)](https://codecov.io/gh/psturc/go-coverage-http)
 # go-coverage-http
 
 Collect Go code coverage from running applications via HTTP - no volumes, no GOCOVERDIR, no deployment modifications needed.
@@ -71,8 +72,8 @@ Demo application showing how to collect coverage from a running app in Kubernete
 ### Files
 
 - `example_app.go` - Simple HTTP server with test endpoints
-- `Dockerfile` - Example Dockerfile for your app (downloads server/coverage_server.go from GitHub during build)
-- `Dockerfile.local` - Local development build (uses local server/coverage_server.go from the current repository)
+- `Dockerfile` - Example Dockerfile for your app (downloads server/coverage_server.go remotely from this repository during build)
+- `Dockerfile.local` - Local development build (uses local server/coverage_server.go from the local directory)
 - `k8s-deployment.yaml` - Kubernetes deployment manifest
 
 ### Quick Start
@@ -81,7 +82,7 @@ Demo application showing how to collect coverage from a running app in Kubernete
 
 ```bash
 # Local build with instrumentation
-docker build -f Dockerfile.local --build-arg ENABLE_COVERAGE=false -t localhost/coverage-http-demo:latest ..
+docker build -f Dockerfile --build-arg ENABLE_COVERAGE=true -t localhost/coverage-http-demo:latest ..
 
 # Local build without instrumentation (without server/coverage_server.go)
 docker build -f Dockerfile --build-arg ENABLE_COVERAGE=false -t localhost/coverage-http-demo:latest .
