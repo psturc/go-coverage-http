@@ -1,0 +1,60 @@
+name: E2E Tests with Kind
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test-e2e:
+    name: Run on Ubuntu
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clone the code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Create KinD Cluster
+        uses: helm/kind-action@v1.10.0
+        with:
+          cluster_name: kind
+
+      - name: Build container image with Podman
+        run: |
+          # Define image name and tag
+          IMAGE_NAME="localhost/coverage-http-demo:latest"
+          echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
+
+          # Build the image using Podman
+          podman build --build-arg ENABLE_COVERAGE=true -t $IMAGE_NAME -f Dockerfile.local .
+
+      - name: Load image into KinD cluster
+        run: |
+          podman image save -o built-image.tar ${{ env.IMAGE_NAME }}
+          kind load image-archive built-image.tar
+
+      - name: Deploy application
+        run: |
+          # Apply the Kubernetes deployment manifest
+          kubectl apply -f k8s-deployment.yaml
+
+          # Wait for the deployment to be ready before running tests
+          kubectl wait --for=condition=Available deployment/coverage-demo -n coverage-demo --timeout=120s
+
+      - name: Run E2E Go Tests
+        run: |
+          # Run the tests and generate coverage report
+          cd test
+          go test -v ./...
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./test/coverage-output/e2e-tests/coverage.txt
+          flags: e2e-tests 
+        # This step runs only on the main branch to avoid uploading reports from forks without a secret.
+        if: github.repository == 'psturc/go-coverage-http'
