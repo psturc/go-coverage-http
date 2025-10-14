@@ -65,51 +65,45 @@ client.GenerateCoverageReport("my-test")
 client.GenerateHTMLReport("my-test")
 ```
 
-## Example
+### 3. Upload Coverage to Codecov (Optional)
 
-Demo application showing how to collect coverage from a running app in Kubernetes.
+Coverage data can be easily uploaded to Codecov via GitHub Actions. See the [workflow example](https://github.com/psturc/go-coverage-http/blob/main/.github/workflows/test-kind.yml) in this repository.
 
-### Files
+## Complete Example
 
-- `example_app.go` - Simple HTTP server with test endpoints
-- `Dockerfile` - Example Dockerfile for your app (downloads server/coverage_server.go remotely from this repository during build)
-- `Dockerfile.local` - Local development build (uses local server/coverage_server.go from the local directory)
-- `k8s-deployment.yaml` - Kubernetes deployment manifest
-
-### Quick Start
-
-#### 1. Build the image with coverage
+This repository includes a working demo application. To try it:
 
 ```bash
-# Local build with instrumentation
-docker build -f Dockerfile --build-arg ENABLE_COVERAGE=true -t localhost/coverage-http-demo:latest ..
+# Build Docker image with coverage enabled
+docker build -f Dockerfile --build-arg ENABLE_COVERAGE=true -t localhost/coverage-http-demo:latest .
 
-# Local build without instrumentation (without server/coverage_server.go)
-docker build -f Dockerfile --build-arg ENABLE_COVERAGE=false -t localhost/coverage-http-demo:latest .
-```
-
-#### 2. Deploy to Kubernetes
-
-```bash
+# Deploy to Kubernetes
 kubectl apply -f k8s-deployment.yaml
+
+# Run E2E tests (will collect coverage automatically)
+cd test && go test -v
 ```
 
-#### 3. Run E2E tests and collect coverage
-
-```bash
-cd ../test
-go test -v
-```
-
-The tests will:
+The E2E tests will:
 - Execute requests against the running pod
 - Collect coverage data via port-forwarding
-- Generate coverage reports in `./coverage-output/`
+- Generate text and HTML reports in `./coverage-output/`
 
-### Endpoints
+### Example Files
 
+- `example_app.go` - Sample HTTP server with test endpoints
+- `Dockerfile` - Production build (downloads `coverage_server.go` from GitHub)
+- `Dockerfile.local` - Local development build (uses local `coverage_server.go`)
+- `k8s-deployment.yaml` - Kubernetes deployment manifest
+- `test/e2e_test.go` - E2E tests with coverage collection
+
+## API Endpoints
+
+**Application endpoints:**
 - `:8080/health` - Health check
 - `:8080/greet?name=X` - Greeting endpoint
 - `:8080/calculate` - Calculation endpoint
-- `:9095/coverage` - Coverage collection endpoint (test builds only)
+
+**Coverage endpoints (test builds only):**
+- `:9095/coverage` - Collect coverage data
 - `:9095/health` - Coverage server health check
