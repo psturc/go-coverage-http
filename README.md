@@ -1,17 +1,36 @@
 # go-coverage-http
 
-Collect Go code coverage from running applications via HTTP.
+Collect Go code coverage from running applications via HTTP - no volumes, no GOCOVERDIR, no deployment modifications needed.
 
-## What is this?
+## Why?
 
-A lightweight library for collecting code coverage from running Go applications, particularly useful for end-to-end tests in Kubernetes environments.
+Traditional coverage collection with `GOCOVERDIR` requires:
+- ❌ Setting `GOCOVERDIR` environment variable
+- ❌ Mounting volumes in Kubernetes for coverage data
+- ❌ Modifying deployment manifests to add volume mounts
+- ❌ Extracting files from volumes after tests
+
+**This solution eliminates all of that:**
+- ✅ No `GOCOVERDIR` needed
+- ✅ No volume mounts required
+- ✅ No deployment manifest changes
+- ✅ Just inject `coverage_server.go` during build
+- ✅ Collect coverage via HTTP with provided client library
+
+## How it works
+
+1. **Build time**: Include `server/coverage_server.go` when building with `-cover` flag
+2. **Runtime**: Coverage server automatically starts on port 9095
+3. **Test time**: Client library collects coverage via HTTP port-forwarding
+4. **Result**: Coverage reports generated automatically
 
 ## Features
 
 - 🚀 **HTTP Coverage Server** - Automatically starts coverage endpoint in your app
 - 🔌 **Client Library** - Collect coverage from Kubernetes pods with port-forwarding
 - 📊 **Report Generation** - Generate text and HTML coverage reports
-- 🎯 **Zero Configuration** - Just import and go
+- 🎯 **Minimal Setup** - Just inject one file during Docker build
+- 🐳 **Kubernetes-friendly** - No volumes, no manifest modifications
 
 ## Quick Start
 
