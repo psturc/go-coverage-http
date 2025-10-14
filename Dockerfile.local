@@ -33,10 +33,6 @@ WORKDIR /app
 # Copy the binary
 COPY --from=builder /app/app /app/app
 
-# Metadata
-ENV APP_NAME=coverage-http-demo
-ENV APP_VERSION=1.0.0
-
 USER 65532:65532
 
 # Run the application
