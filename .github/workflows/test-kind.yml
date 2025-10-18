@@ -49,12 +49,13 @@ jobs:
           # Run the tests and generate coverage report
           cd test
           go test -v ./...
+          cp coverage-output/e2e-tests/coverage.out ../coverage.out
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./test/coverage-output/e2e-tests/coverage.out
+          files: ./coverage.out
           flags: e2e-tests 
         # This step runs only on the main branch to avoid uploading reports from forks without a secret.
         if: github.repository == 'psturc/go-coverage-http'
