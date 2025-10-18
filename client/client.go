@@ -238,7 +238,7 @@ func (c *CoverageClient) collectCoverageFromURL(coverageURL, testName string) er
 // GenerateCoverageReport generates a text coverage report from collected data
 func (c *CoverageClient) GenerateCoverageReport(testName string) error {
 	testDir := filepath.Join(c.outputDir, testName)
-	reportPath := filepath.Join(testDir, "coverage.txt")
+	reportPath := filepath.Join(testDir, "coverage.out")
 
 	fmt.Printf("📊 Generating coverage report for test: %s\n", testName)
 
@@ -259,7 +259,7 @@ func (c *CoverageClient) GenerateCoverageReport(testName string) error {
 // FilterCoverageReport filters out coverage_server.go from the coverage report
 func (c *CoverageClient) FilterCoverageReport(testName string) error {
 	testDir := filepath.Join(c.outputDir, testName)
-	reportPath := filepath.Join(testDir, "coverage.txt")
+	reportPath := filepath.Join(testDir, "coverage.out")
 	filteredPath := filepath.Join(testDir, "coverage_filtered.txt")
 
 	data, err := os.ReadFile(reportPath)
@@ -294,7 +294,7 @@ func (c *CoverageClient) GenerateHTMLReport(testName string) error {
 
 	// Check if filtered report exists, fallback to regular report
 	if _, err := os.Stat(reportPath); os.IsNotExist(err) {
-		reportPath = filepath.Join(testDir, "coverage.txt")
+		reportPath = filepath.Join(testDir, "coverage.out")
 	}
 
 	fmt.Printf("📊 Generating HTML coverage report for test: %s\n", testName)
@@ -319,7 +319,7 @@ func (c *CoverageClient) PrintCoverageSummary(testName string) error {
 
 	// Check if filtered report exists, fallback to regular report
 	if _, err := os.Stat(reportPath); os.IsNotExist(err) {
-		reportPath = filepath.Join(testDir, "coverage.txt")
+		reportPath = filepath.Join(testDir, "coverage.out")
 	}
 
 	data, err := os.ReadFile(reportPath)
