@@ -58,3 +58,11 @@ jobs:
           flags: e2e-tests 
         # This step runs only on the main branch to avoid uploading reports from forks without a secret.
         if: github.repository == 'psturc/go-coverage-http'
+
+      - name: SonarCloud Scan
+        uses: SonarSource/sonarcloud-github-action@master
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        # This step runs only on the main branch to avoid uploading reports from forks without a secret.
+        if: github.repository == 'psturc/go-coverage-http'
