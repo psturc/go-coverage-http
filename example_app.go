@@ -24,6 +24,9 @@ func Greet(name string) string {
 	if name == "" {
 		return "Hello, stranger!"
 	}
+	if len(name) < 2 {
+		return "Are you sure you are human?"
+	}
 	return "Hello, " + name + "!"
 }
 
