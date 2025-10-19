@@ -21,3 +21,5 @@ coverage-output/
 *.swo
 *~
 
+# SonarQube
+.scannerwork/
