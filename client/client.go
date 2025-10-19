@@ -26,13 +26,11 @@ import (
 
 // CoverageClient handles coverage collection from Kubernetes pods
 type CoverageClient struct {
-	clientset       *kubernetes.Clientset
+	clientset       kubernetes.Interface
 	restConfig      *rest.Config
 	namespace       string
 	outputDir       string
 	httpClient      *http.Client
-	portForwardStop chan struct{}
-	localPort       int
 	defaultFilters  []string // Default file patterns to filter out from coverage
 	sourceDir       string   // Local source directory for path remapping
 	enablePathRemap bool     // Whether to automatically remap container paths
