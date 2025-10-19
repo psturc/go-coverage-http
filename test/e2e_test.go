@@ -23,7 +23,8 @@ const (
 	labelSelector = "app=coverage-demo"
 	targetPort    = 9095 // Coverage server port
 	coverageDir   = "./coverage-output"
-	appUrl        = "http://localhost:8000"
+	// Use 127.0.0.1 instead of localhost to explicitly use IPv4
+	appUrl = "http://127.0.0.1:8000"
 	// Set source directory to parent directory (project root)
 	// Since tests run from ./test/, we need to go up one level
 	projectRoot = ".."

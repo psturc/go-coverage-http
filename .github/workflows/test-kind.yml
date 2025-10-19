@@ -21,6 +21,7 @@ jobs:
         uses: helm/kind-action@v1.10.0
         with:
           cluster_name: kind
+          config: kind-config.yaml
 
       - name: Build container image with Podman
         run: |
@@ -43,6 +44,23 @@ jobs:
 
           # Wait for the deployment to be ready before running tests
           kubectl wait --for=condition=Available deployment/coverage-demo -n coverage-demo --timeout=120s
+          
+          # Wait for pod to be fully ready
+          kubectl wait --for=condition=Ready pod -l app=coverage-demo -n coverage-demo --timeout=60s
+          
+          # Give the service a moment to establish port mapping
+          echo "Waiting for service to be accessible..."
+          for i in {1..30}; do
+            if curl -f http://127.0.0.1:8000/health 2>/dev/null; then
+              echo "Service is accessible!"
+              break
+            fi
+            echo "Attempt $i: Service not ready yet, retrying..."
+            sleep 2
+          done
+          
+          # Verify service is accessible
+          curl -v http://127.0.0.1:8000/health
 
       - name: Run E2E Go Tests
         run: |
