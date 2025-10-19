@@ -13,8 +13,8 @@ func main() {
 	http.HandleFunc("/greet", GreetHandler)
 	http.HandleFunc("/calculate", CalculateHandler)
 
-	log.Println("Server running on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	log.Println("Server running on :8000")
+	if err := http.ListenAndServe(":8000", nil); err != nil {
 		log.Fatalf("Server failed: %v", err)
 	}
 }

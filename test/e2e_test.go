@@ -2,8 +2,8 @@ package main
 
 import (
 	"context"
-	"os/exec"
-	"strings"
+	"io"
+	"net/http"
 	"testing"
 	"time"
 
@@ -19,52 +19,65 @@ func TestE2E(t *testing.T) {
 }
 
 const (
-	namespace  = "coverage-demo"
-	targetPort = 9095 // Coverage server port
+	namespace     = "coverage-demo"
+	labelSelector = "app=coverage-demo"
+	targetPort    = 9095 // Coverage server port
+	coverageDir   = "./coverage-output"
+	appUrl        = "http://localhost:8000"
+	// Set source directory to parent directory (project root)
+	// Since tests run from ./test/, we need to go up one level
+	projectRoot = ".."
 )
 
 var (
 	podName        string
 	coverageClient *coverageclient.CoverageClient
-	coverageDir    = "./coverage-output"
 )
 
 var _ = BeforeSuite(func() {
-	// Wait for pod to be ready
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "kubectl", "get", "pod", "-n", namespace,
-		"-l", "app=coverage-demo", "-o", "jsonpath={.items[0].metadata.name}")
-	output, err := cmd.Output()
-	Expect(err).NotTo(HaveOccurred())
-
-	podName = strings.TrimSpace(string(output))
-	Expect(podName).NotTo(BeEmpty(), "Pod not found")
-
-	GinkgoWriter.Printf("✅ Testing pod: %s\n", podName)
+	var err error
 
 	// Initialize coverage client
 	coverageClient, err = coverageclient.NewClient(namespace, coverageDir)
 	Expect(err).NotTo(HaveOccurred(), "Failed to create coverage client")
 
-	GinkgoWriter.Println("✅ Coverage client initialized")
+	coverageClient.SetSourceDirectory(projectRoot)
+	GinkgoWriter.Printf("✅ Coverage client initialized (source dir: %s)\n", projectRoot)
+
+	// Discover pod using label selector
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	podName, err = coverageClient.GetPodNameWithContext(ctx, labelSelector)
+	Expect(err).NotTo(HaveOccurred(), "Failed to discover pod")
 })
 
 var _ = Describe("Application E2E Tests", func() {
 	It("should respond to health checks", func() {
-		resp := execInPod("wget -q -O- http://localhost:8080/health")
-		Expect(resp).To(ContainSubstring("healthy"))
+		resp, err := http.Get(appUrl + "/health")
+		Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("healthy"))
 	})
 
 	It("should handle greet requests", func() {
-		resp := execInPod("wget -q -O- 'http://localhost:8080/greet?name=Test'")
-		Expect(resp).To(ContainSubstring("Hello, Test!"))
+		resp, err := http.Get(appUrl + "/greet?name=Test")
+		Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("Hello, Test!"))
 	})
 
 	It("should handle calculate requests", func() {
-		resp := execInPod("wget -q -O- http://localhost:8080/calculate")
-		Expect(resp).To(ContainSubstring("result"))
+		resp, err := http.Get(appUrl + "/calculate")
+		Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("15"))
 	})
 })
 
@@ -79,22 +92,10 @@ var _ = AfterSuite(func() {
 	err := coverageClient.CollectCoverageFromPod(ctx, podName, testName, targetPort)
 	Expect(err).NotTo(HaveOccurred(), "Failed to collect coverage")
 
-	// Generate text report
-	By("Generating coverage report")
-	err = coverageClient.GenerateCoverageReport(testName)
-	Expect(err).NotTo(HaveOccurred(), "Failed to generate coverage report")
-
-	// Filter out coverage_server.go
-	By("Filtering coverage report")
-	err = coverageClient.FilterCoverageReport(testName)
-	Expect(err).NotTo(HaveOccurred(), "Failed to filter coverage report")
-
-	// Generate HTML report
-	By("Generating HTML report")
-	err = coverageClient.GenerateHTMLReport(testName)
-	if err != nil {
-		GinkgoWriter.Printf("⚠️  HTML report generation failed (source files may not be available): %v\n", err)
-	}
+	// Process coverage reports (generate, filter, and create HTML)
+	By("Processing coverage reports")
+	err = coverageClient.ProcessCoverageReports(testName)
+	Expect(err).NotTo(HaveOccurred(), "Failed to process coverage reports")
 
 	// Print coverage summary
 	By("Printing coverage summary")
@@ -106,15 +107,3 @@ var _ = AfterSuite(func() {
 	GinkgoWriter.Println("\n✅ Coverage collection complete!")
 	GinkgoWriter.Printf("📊 Reports in: %s/%s/\n", coverageDir, testName)
 })
-
-// execInPod executes a command in the pod and returns output
-func execInPod(command string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, "kubectl", "exec", "-n", namespace, podName, "--", "sh", "-c", command)
-	output, err := cmd.CombinedOutput()
-	Expect(err).NotTo(HaveOccurred(), "Command failed: %s", string(output))
-
-	return string(output)
-}

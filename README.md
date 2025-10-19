@@ -25,6 +25,8 @@ Traditional coverage collection with `GOCOVERDIR` requires:
 3. **Test time**: Client library collects coverage via HTTP port-forwarding
 4. **Result**: Coverage reports generated automatically
 
+📖 **Want technical details?** See [TECHNICAL.md](TECHNICAL.md) for in-depth architecture, algorithms, and implementation details.
+
 ## Features
 
 - 🚀 **HTTP Coverage Server** - Automatically starts coverage endpoint in your app
@@ -57,13 +59,83 @@ import coverageclient "github.com/psturc/go-coverage-http/client"
 // Create client
 client, _ := coverageclient.NewClient("default", "./coverage-output")
 
-// Collect from Kubernetes pod
-client.CollectCoverageFromPod(ctx, "my-pod", "my-test", 9095)
+// Discover pod dynamically using label selector
+podName, _ := client.GetPodName("app=my-app")
 
-// Generate reports
+// Or use the manual pod name
+// podName := "my-pod-12345"
+
+// Collect from Kubernetes pod
+client.CollectCoverageFromPod(ctx, podName, "my-test", 9095)
+
+// Option 1: Use convenience method (automatically filters coverage_server.go)
+client.ProcessCoverageReports("my-test")
+
+// Option 2: Manual control over each step
 client.GenerateCoverageReport("my-test")
+client.FilterCoverageReport("my-test")  // Uses default filters
 client.GenerateHTMLReport("my-test")
+
+// Option 3: Custom filtering
+client.FilterCoverageReport("my-test", "coverage_server.go", "test_helper.go")
 ```
+
+#### Pod Discovery
+
+The client can automatically discover pods using Kubernetes label selectors, eliminating the need for manual pod name lookup:
+
+```go
+// Simple pod discovery (uses default context)
+podName, err := client.GetPodName("app=my-app")
+
+// With custom context and timeout
+ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+defer cancel()
+podName, err := client.GetPodNameWithContext(ctx, "app=my-app,version=v1.0")
+
+// The method will:
+// - List all pods matching the label selector
+// - Find the first pod in "Running" state
+// - Return an error if no running pods are found
+```
+
+#### Filtering Coverage Data
+
+By default, the client automatically filters out `coverage_server.go` from reports to avoid including the coverage collection infrastructure itself. You can customize this behavior:
+
+```go
+// Add additional files to filter
+client.AddDefaultFilter("internal/test_helper.go")
+
+// Replace default filters
+client.SetDefaultFilters([]string{"coverage_server.go", "mock_*.go"})
+
+// Disable filtering (pass empty slice)
+client.FilterCoverageReport("my-test", []string{}...)
+```
+
+#### Path Remapping
+
+The client automatically detects and remaps container paths (e.g., `/app/example_app.go`) to local filesystem paths. This uses intelligent matching based on relative path structure:
+
+```go
+// Path remapping is enabled by default
+client.ProcessCoverageReports("my-test")
+
+// Configure source directory (defaults to current working directory)
+client.SetSourceDirectory("/path/to/my/project")
+
+// Disable path remapping if needed
+client.SetPathRemapping(false)
+```
+
+**How it works:**
+1. The client analyzes coverage paths that don't exist locally (e.g., `/app/example_app.go`)
+2. Matches them to local files by comparing path structures
+3. Automatically determines the mapping (e.g., `/app/` → `/Users/user/project/`)
+4. Rewrites coverage data to use local paths
+
+This allows tools like `go tool cover` to find source files and generate HTML reports with proper source code display.
 
 ### 3. Upload Coverage to Codecov (Optional)
 
@@ -75,7 +147,7 @@ This repository includes a working demo application. To try it:
 
 ```bash
 # Build Docker image with coverage enabled
-docker build -f Dockerfile --build-arg ENABLE_COVERAGE=true -t localhost/coverage-http-demo:latest .
+docker build -f Dockerfile --build-arg ENABLE_COVERAGE=true -t localhost/coverage-http-demo:test .
 
 # Deploy to Kubernetes
 kubectl apply -f k8s-deployment.yaml
@@ -100,10 +172,24 @@ The E2E tests will:
 ## API Endpoints
 
 **Application endpoints:**
-- `:8080/health` - Health check
-- `:8080/greet?name=X` - Greeting endpoint
-- `:8080/calculate` - Calculation endpoint
+- `:8000/health` - Health check
+- `:8000/greet?name=X` - Greeting endpoint
+- `:8000/calculate` - Calculation endpoint
 
 **Coverage endpoints (test builds only):**
 - `:9095/coverage` - Collect coverage data
 - `:9095/health` - Coverage server health check
+
+## Additional Documentation
+
+- **[TECHNICAL.md](TECHNICAL.md)** - Deep dive into architecture, algorithms, binary formats, and implementation details
+- **[Example Workflow](.github/workflows/test-kind.yml)** - Complete CI/CD pipeline with coverage collection and Codecov upload
+- **[Example Test](test/e2e_test.go)** - Full e2e test implementation with coverage collection
+
+## Contributing
+
+Contributions are welcome! Please feel free to submit a Pull Request.
+
+## License
+
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.

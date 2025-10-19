@@ -25,7 +25,7 @@ jobs:
       - name: Build container image with Podman
         run: |
           # Define image name and tag
-          IMAGE_NAME="localhost/coverage-http-demo:latest"
+          IMAGE_NAME="localhost/coverage-http-demo:test"
           echo "IMAGE_NAME=$IMAGE_NAME" >> $GITHUB_ENV
 
           # Build the image using Podman
@@ -49,7 +49,7 @@ jobs:
           # Run the tests and generate coverage report
           cd test
           go test -v ./...
-          cp coverage-output/e2e-tests/coverage.out ../coverage.out
+          cp coverage-output/e2e-tests/coverage_filtered.out ../coverage.out
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
