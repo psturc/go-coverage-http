@@ -2,6 +2,9 @@ name: E2E Tests with Kind
 
 on:
   push:
+    branches:
+      - main
+      - go-v1.22
   pull_request:
 
 jobs:

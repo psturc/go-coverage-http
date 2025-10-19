@@ -72,6 +72,15 @@ var _ = Describe("Application E2E Tests", func() {
 		Expect(string(body)).To(ContainSubstring("Hello, Test!"))
 	})
 
+	It("should handle greet requests with 'unhuman' name", func() {
+		resp, err := http.Get(appUrl + "/greet?name=X")
+		Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("Are you sure you are human?"))
+	})
+
 	It("should handle calculate requests", func() {
 		resp, err := http.Get(appUrl + "/calculate")
 		Expect(err).NotTo(HaveOccurred())
