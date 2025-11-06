@@ -2,7 +2,7 @@ name: E2E Tests with Kind
 
 on:
   push:
-  pull_request:
+  pull_request_target:
 
 jobs:
   test-e2e:
