@@ -37,6 +37,7 @@ func startCoverageServer() {
 	// Create a new ServeMux for the coverage server (isolated from main app)
 	mux := http.NewServeMux()
 	mux.HandleFunc("/coverage", CoverageHandler)
+	mux.HandleFunc("/metadata", MetadataHandler)
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		fmt.Fprintf(w, "coverage server healthy")
@@ -106,4 +107,40 @@ func CoverageHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	log.Println("[COVERAGE] Coverage data sent successfully")
+}
+
+type buildInfo struct {
+	CommitSHA string `json:"git_commit_sha"`
+	RepoURL   string `json:"git_repo_url"`
+	BuildTime string `json:"build_time"`
+}
+
+func MetadataHandler(w http.ResponseWriter, r *http.Request) {
+	log.Println("[METADATA] Collecting build metadata...")
+
+	info := buildInfo{
+		// Read directly from the environment
+		CommitSHA: os.Getenv("GIT_COMMIT_SHA"),
+		RepoURL:   os.Getenv("GIT_REPO_URL"),
+		BuildTime: os.Getenv("BUILD_TIME"),
+	}
+
+	// Set default values if empty
+	if info.CommitSHA == "" {
+		info.CommitSHA = "unknown"
+	}
+	if info.RepoURL == "" {
+		info.RepoURL = "unknown"
+	}
+	if info.BuildTime == "" {
+		info.BuildTime = "unknown"
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(info); err != nil {
+		log.Printf("Error encoding build info: %v", err)
+		http.Error(w, "Error encoding info", http.StatusInternalServerError)
+		return
+	}
+	log.Println("[METADATA] Build metadata sent successfully")
 }
