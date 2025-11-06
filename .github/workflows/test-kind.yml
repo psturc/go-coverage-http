@@ -21,11 +21,10 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Create KinD Cluster
-        uses: helm/kind-action@v1.10.0
+      - uses: debianmaster/actions-k3s@v1.0.5
+        id: k3s
         with:
-          cluster_name: kind
-          config: kind-config.yaml
+          version: 'latest'
 
       - name: Build container image with Podman
         run: |
