@@ -478,7 +478,7 @@ func (c *CoverageClient) remapCoveragePaths(reportPath string) error {
 
 	fmt.Printf("📍 Auto-detected path mappings:\n")
 	for containerPath, localPath := range pathMappings {
-		fmt.Printf("   %s -> %s\n", containerPath, localPath)
+		fmt.Printf("  [PATH] %s -> %s\n", containerPath, localPath)
 	}
 
 	// Remap paths in the coverage data
@@ -557,16 +557,16 @@ func (c *CoverageClient) detectContainerPaths(lines []string) map[string]string 
 		return nil
 	}
 
-	fmt.Printf("   Detected %d container paths to remap\n", len(containerFiles))
+	fmt.Printf("[REMAP] Detected %d container paths to remap\n", len(containerFiles))
 
 	// Get absolute path for source directory
 	absSourceDir, err := filepath.Abs(c.sourceDir)
 	if err != nil {
-		fmt.Printf("   Warning: Could not get absolute path for %s: %v\n", c.sourceDir, err)
+		fmt.Printf("[REMAP] Warning: Could not get absolute path for %s: %v\n", c.sourceDir, err)
 		absSourceDir = c.sourceDir
 	}
 
-	fmt.Printf("   Searching for source files in: %s\n", absSourceDir)
+	fmt.Printf("[REMAP] Searching for source files in: %s\n", absSourceDir)
 
 	// Build a map of local Go files by their relative path structure
 	localFilesByRelPath := make(map[string]string) // key: relative path parts joined, value: full path
@@ -592,11 +592,11 @@ func (c *CoverageClient) detectContainerPaths(lines []string) map[string]string 
 	})
 
 	if err != nil {
-		fmt.Printf("   Warning: Error walking source directory: %v\n", err)
+		fmt.Printf("[REMAP] Warning: Error walking source directory: %v\n", err)
 		return nil
 	}
 
-	fmt.Printf("   Found %d Go source files\n", len(localFilesByRelPath))
+	fmt.Printf("[REMAP] Found %d Go source files\n", len(localFilesByRelPath))
 
 	// Try to match container files to local files
 	type match struct {
@@ -654,16 +654,16 @@ func (c *CoverageClient) detectContainerPaths(lines []string) map[string]string 
 				localFile:     bestMatch,
 				matchScore:    bestScore,
 			})
-			fmt.Printf("   Match: %s -> %s (score: %d)\n", containerFile, bestMatch, bestScore)
+			fmt.Printf("[REMAP] Match: %s -> %s (score: %d)\n", containerFile, bestMatch, bestScore)
 		}
 	}
 
 	if len(matches) == 0 {
-		fmt.Printf("   No matching files found between container and local paths\n")
+		fmt.Printf("[REMAP] No matching files found between container and local paths\n")
 		return nil
 	}
 
-	fmt.Printf("   Found %d matches between container and local files\n", len(matches))
+	fmt.Printf("[REMAP] Found %d matches between container and local files\n", len(matches))
 
 	// Determine the most common container root prefix
 	containerRootCounts := make(map[string]int)
@@ -672,7 +672,7 @@ func (c *CoverageClient) detectContainerPaths(lines []string) map[string]string 
 		containerParts := strings.Split(filepath.Clean(m.containerFile), string(filepath.Separator))
 		// Extract container root (everything except the matched suffix)
 		rootPartsCount := len(containerParts) - m.matchScore
-		fmt.Printf("   Container: %s, parts: %v, score: %d, rootPartsCount: %d\n",
+		fmt.Printf("[REMAP] Container: %s, parts: %v, score: %d, rootPartsCount: %d\n",
 			m.containerFile, containerParts, m.matchScore, rootPartsCount)
 		if rootPartsCount > 0 {
 			rootParts := containerParts[:rootPartsCount]
@@ -680,7 +680,7 @@ func (c *CoverageClient) detectContainerPaths(lines []string) map[string]string 
 			if !strings.HasSuffix(containerRoot, string(filepath.Separator)) {
 				containerRoot += string(filepath.Separator)
 			}
-			fmt.Printf("   -> Container root candidate: %s\n", containerRoot)
+			fmt.Printf("[REMAP] Container root candidate: %s\n", containerRoot)
 			containerRootCounts[containerRoot]++
 		}
 	}
@@ -696,11 +696,11 @@ func (c *CoverageClient) detectContainerPaths(lines []string) map[string]string 
 	}
 
 	if bestContainerRoot == "" {
-		fmt.Printf("   Could not determine container root\n")
+		fmt.Printf("[REMAP] Could not determine container root\n")
 		return nil
 	}
 
-	fmt.Printf("   Detected container root: %s\n", bestContainerRoot)
+	fmt.Printf("[REMAP] Detected container root: %s\n", bestContainerRoot)
 
 	// Calculate the local root from all matches - find the common ancestor
 	// This ensures we get the project root, not a subdirectory
@@ -719,7 +719,7 @@ func (c *CoverageClient) detectContainerPaths(lines []string) map[string]string 
 					candidateRoot += string(filepath.Separator)
 				}
 				localRootCandidates = append(localRootCandidates, candidateRoot)
-				fmt.Printf("   Root candidate from %s: %s\n", filepath.Base(m.localFile), candidateRoot)
+				fmt.Printf("[REMAP] Root candidate from %s: %s\n", filepath.Base(m.localFile), candidateRoot)
 			}
 		}
 	}
@@ -737,11 +737,11 @@ func (c *CoverageClient) detectContainerPaths(lines []string) map[string]string 
 	}
 
 	if localRoot == "" {
-		fmt.Printf("   Could not determine local root\n")
+		fmt.Printf("[REMAP] Could not determine local root\n")
 		return nil
 	}
 
-	fmt.Printf("   Detected local root: %s\n", localRoot)
+	fmt.Printf("[REMAP] Detected local root: %s\n", localRoot)
 
 	// Return the path mapping
 	return map[string]string{
