@@ -37,19 +37,30 @@ jobs:
 
       - name: Load image into K3s cluster
         run: |
-          # Save the image as a tar archive (using OCI format for better compatibility)
-          podman image save --format oci-archive -o built-image.tar ${{ env.IMAGE_NAME }}
+          # Save the image as a tar archive
+          podman image save -o built-image.tar ${{ env.IMAGE_NAME }}
           
           # Import the image into containerd (k3s uses containerd runtime)
           # Use ctr with the k8s.io namespace which is what k3s/kubernetes uses
           sudo ctr -n k8s.io images import built-image.tar
           
+          # Tag the image with the exact reference that Kubernetes expects
+          # After import, the image might have a different reference, so we ensure it has the correct tag
+          IMPORTED_REF=$(sudo ctr -n k8s.io images ls | grep coverage-http-demo | awk '{print $1}' | head -n 1)
+          if [ -n "$IMPORTED_REF" ]; then
+            echo "Found imported image: $IMPORTED_REF"
+            # Tag it with the name Kubernetes expects
+            sudo ctr -n k8s.io images tag "$IMPORTED_REF" "${{ env.IMAGE_NAME }}"
+            echo "Tagged as: ${{ env.IMAGE_NAME }}"
+          fi
+          
           # Verify the image is loaded and show all imported images
+          echo ""
           echo "Images in containerd k8s.io namespace:"
           sudo ctr -n k8s.io images ls
           echo ""
-          echo "Checking for our specific image:"
-          sudo ctr -n k8s.io images ls | grep coverage-http-demo || echo "WARNING: Image not found!"
+          echo "Verifying our specific image reference:"
+          sudo ctr -n k8s.io images ls | grep "${{ env.IMAGE_NAME }}" || echo "WARNING: Image with expected reference not found!"
 
       - name: Deploy application
         run: |
