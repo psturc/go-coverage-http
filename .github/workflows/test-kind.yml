@@ -21,10 +21,21 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - uses: debianmaster/actions-k3s@v1.0.5
-        id: k3s
-        with:
-          version: 'latest'
+      - name: Install K3s
+        run: |
+          # Install k3s using the official installation script
+          curl -sfL https://get.k3s.io | sh -s - --write-kubeconfig-mode 644
+          
+          # Wait for k3s to be ready
+          timeout 120s bash -c 'until kubectl get nodes 2>/dev/null; do sleep 2; done'
+          
+          # Verify k3s is running
+          sudo systemctl status k3s --no-pager
+          kubectl get nodes
+          
+          # Verify k3s binary is available
+          which k3s
+          k3s --version
 
       - name: Build container image with Podman
         run: |
@@ -37,21 +48,18 @@ jobs:
 
       - name: Load image into K3s cluster
         run: |
-          # Save the image as a tar archive
-          podman image save -o built-image.tar ${{ env.IMAGE_NAME }}
-          
-          # Import the image into containerd (k3s uses containerd runtime)
-          # Use ctr with the k8s.io namespace which is what k3s/kubernetes uses
-          sudo ctr -n k8s.io images import built-image.tar
+          # Import the image directly to k3s using the k3s ctr command
+          # https://stackoverflow.com/questions/57590030/access-local-docker-images-with-k3s
+          podman save ${{ env.IMAGE_NAME }} | sudo k3s ctr images import -
           
           # Verify the image is loaded
           echo ""
-          echo "Images in containerd k8s.io namespace:"
-          sudo ctr -n k8s.io images ls
+          echo "Images in k3s containerd:"
+          sudo k3s ctr images ls
           echo ""
-          echo "Verifying our specific image reference:"
-          if sudo ctr -n k8s.io images ls | grep -q "${{ env.IMAGE_NAME }}"; then
-            echo "✅ Image ${{ env.IMAGE_NAME }} successfully loaded into containerd"
+          echo "Checking for our specific image:"
+          if sudo k3s ctr images ls | grep -q "${{ env.IMAGE_NAME }}"; then
+            echo "✅ Image ${{ env.IMAGE_NAME }} successfully loaded into k3s"
           else
             echo "❌ ERROR: Image with expected reference not found!"
             exit 1
