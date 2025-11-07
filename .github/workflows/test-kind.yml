@@ -37,23 +37,40 @@ jobs:
 
       - name: Load image into K3s cluster
         run: |
-          # Save the image as a tar archive
-          podman image save -o built-image.tar ${{ env.IMAGE_NAME }}
+          # Save the image as a tar archive (using OCI format for better compatibility)
+          podman image save --format oci-archive -o built-image.tar ${{ env.IMAGE_NAME }}
           
           # Import the image into containerd (k3s uses containerd runtime)
           # Use ctr with the k8s.io namespace which is what k3s/kubernetes uses
           sudo ctr -n k8s.io images import built-image.tar
           
-          # Verify the image is loaded
-          sudo ctr -n k8s.io images ls | grep coverage-http-demo
+          # Verify the image is loaded and show all imported images
+          echo "Images in containerd k8s.io namespace:"
+          sudo ctr -n k8s.io images ls
+          echo ""
+          echo "Checking for our specific image:"
+          sudo ctr -n k8s.io images ls | grep coverage-http-demo || echo "WARNING: Image not found!"
 
       - name: Deploy application
         run: |
           # Apply the Kubernetes deployment manifest
           kubectl apply -f k8s-deployment.yaml
 
+          # Debug: Check pod status and events
+          echo "Checking pod status..."
+          kubectl get pods -n coverage-demo -o wide || true
+          kubectl describe pods -n coverage-demo || true
+          
           # Wait for the deployment to be ready before running tests
-          kubectl wait --for=condition=Available deployment/coverage-demo -n coverage-demo --timeout=120s
+          echo "Waiting for deployment to be available..."
+          if ! kubectl wait --for=condition=Available deployment/coverage-demo -n coverage-demo --timeout=120s; then
+            echo "Deployment failed to become available. Debugging..."
+            kubectl get pods -n coverage-demo -o wide
+            kubectl describe deployment coverage-demo -n coverage-demo
+            kubectl describe pods -n coverage-demo
+            kubectl logs -n coverage-demo -l app=coverage-demo --tail=50 || true
+            exit 1
+          fi
           
           # Wait for pod to be fully ready
           kubectl wait --for=condition=Ready pod -l app=coverage-demo -n coverage-demo --timeout=60s
