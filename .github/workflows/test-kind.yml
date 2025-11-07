@@ -40,11 +40,12 @@ jobs:
           # Save the image as a tar archive
           podman image save -o built-image.tar ${{ env.IMAGE_NAME }}
           
-          # Import the image into k3s containerd
-          sudo k3s ctr images import built-image.tar
+          # Import the image into containerd (k3s uses containerd runtime)
+          # Use ctr with the k8s.io namespace which is what k3s/kubernetes uses
+          sudo ctr -n k8s.io images import built-image.tar
           
           # Verify the image is loaded
-          sudo k3s ctr images ls | grep coverage-http-demo
+          sudo ctr -n k8s.io images ls | grep coverage-http-demo
 
       - name: Deploy application
         run: |
