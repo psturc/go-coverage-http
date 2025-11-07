@@ -1,4 +1,4 @@
-name: E2E Tests with Kind
+name: E2E Tests with K3s
 
 on:
   push:
@@ -35,10 +35,16 @@ jobs:
           # Build the image using Podman
           podman build --build-arg ENABLE_COVERAGE=true -t $IMAGE_NAME -f Dockerfile.local .
 
-      - name: Load image into KinD cluster
+      - name: Load image into K3s cluster
         run: |
+          # Save the image as a tar archive
           podman image save -o built-image.tar ${{ env.IMAGE_NAME }}
-          kind load image-archive built-image.tar
+          
+          # Import the image into k3s containerd
+          sudo k3s ctr images import built-image.tar
+          
+          # Verify the image is loaded
+          sudo k3s ctr images ls | grep coverage-http-demo
 
       - name: Deploy application
         run: |
