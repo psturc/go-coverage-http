@@ -22,6 +22,9 @@ func main() {
 // Greet returns a greeting message
 func Greet(name string) string {
 	if name == "" {
+		fmt.Println("###")
+		fmt.Println("again just for testing")
+		fmt.Println("###")
 		return "Hello, stranger!"
 	} else if len(name) > 100 {
 		fmt.Println("###")
