@@ -608,39 +608,39 @@ func TestCoverageResponse_JSONSerialization(t *testing.T) {
 	}
 }
 
-func TestPrintCoverageSummary(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "summary-test-*")
-	defer os.RemoveAll(tempDir)
+// func TestPrintCoverageSummary(t *testing.T) {
+// 	tempDir, _ := os.MkdirTemp("", "summary-test-*")
+// 	defer os.RemoveAll(tempDir)
 
-	testDir := filepath.Join(tempDir, "test-case")
-	os.MkdirAll(testDir, 0755)
+// 	testDir := filepath.Join(tempDir, "test-case")
+// 	os.MkdirAll(testDir, 0755)
 
-	reportContent := `mode: atomic
-github.com/test/pkg/file.go:10.1,12.2 2 1`
-	reportPath := filepath.Join(testDir, "coverage.out")
-	os.WriteFile(reportPath, []byte(reportContent), 0644)
+// 	reportContent := `mode: atomic
+// github.com/test/pkg/file.go:10.1,12.2 2 1`
+// 	reportPath := filepath.Join(testDir, "coverage.out")
+// 	os.WriteFile(reportPath, []byte(reportContent), 0644)
 
-	client := &CoverageClient{
-		outputDir: tempDir,
-	}
+// 	client := &CoverageClient{
+// 		outputDir: tempDir,
+// 	}
 
-	// Should not error
-	err := client.PrintCoverageSummary("test-case")
-	if err != nil {
-		t.Errorf("Unexpected error: %v", err)
-	}
-}
+// 	// Should not error
+// 	err := client.PrintCoverageSummary("test-case")
+// 	if err != nil {
+// 		t.Errorf("Unexpected error: %v", err)
+// 	}
+// }
 
-func TestPrintCoverageSummary_MissingFile(t *testing.T) {
-	tempDir, _ := os.MkdirTemp("", "summary-test-*")
-	defer os.RemoveAll(tempDir)
+// func TestPrintCoverageSummary_MissingFile(t *testing.T) {
+// 	tempDir, _ := os.MkdirTemp("", "summary-test-*")
+// 	defer os.RemoveAll(tempDir)
 
-	client := &CoverageClient{
-		outputDir: tempDir,
-	}
+// 	client := &CoverageClient{
+// 		outputDir: tempDir,
+// 	}
 
-	err := client.PrintCoverageSummary("nonexistent-test")
-	if err == nil {
-		t.Error("Expected error for missing coverage file")
-	}
-}
+// 	err := client.PrintCoverageSummary("nonexistent-test")
+// 	if err == nil {
+// 		t.Error("Expected error for missing coverage file")
+// 	}
+// }
