@@ -24,6 +24,9 @@ func Greet(name string) string {
 	if name == "" {
 		return "Hello, stranger!"
 	} else if len(name) > 100 {
+		fmt.Println("###")
+		fmt.Println("just for testing")
+		fmt.Println("###")
 		return "Hello, " + name + "! Wow you have a long name."
 	}
 	return "Hello, " + name + "!"
