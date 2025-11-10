@@ -120,6 +120,15 @@ var _ = Describe("Application E2E Tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(body)).To(ContainSubstring("15"))
 	})
+
+	It("should handle calculate requests with big numbers", func() {
+		resp, err := http.Get(appUrl + "/calculate?a=1001&b=1001")
+		Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("2002"))
+	})
 })
 
 var _ = AfterSuite(func() {
