@@ -1,0 +1,235 @@
+apiVersion: tekton.dev/v1
+kind: Pipeline
+metadata:
+  name: go-coverage-http-e2e
+spec:
+  description: |
+    Integration test pipeline for go-coverage-http that:
+    - Deploys the instrumented Go application to OpenShift
+    - Runs E2E tests with coverage collection
+    - Pushes coverage artifacts to quay.io as OCI artifacts
+  params:
+    - description: Snapshot of the application
+      name: SNAPSHOT
+      type: string
+  tasks:
+    - name: test-metadata
+      params:
+        - name: SNAPSHOT
+          value: $(params.SNAPSHOT)
+        - name: test-name
+          value: $(context.pipelineRun.name)
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/konflux-ci/tekton-integration-catalog.git
+          - name: revision
+            value: main
+          - name: pathInRepo
+            value: common/tasks/test-metadata/0.1/test-metadata.yaml
+    
+    - name: deploy
+      runAfter:
+        - test-metadata
+      taskSpec:
+        results:
+          - name: NAMESPACE
+            description: The namespace where the app was deployed
+          - name: APP_URL
+            description: The base URL of the deployed service
+        steps:
+          - name: deploy-application
+            image: registry.redhat.io/openshift4/ose-cli:v4.15
+            workingDir: /workspace
+            env:
+              - name: JOB_SPEC
+                value: $(tasks.test-metadata.results.job-spec)
+              - name: SNAPSHOT
+                value: $(params.SNAPSHOT)
+              - name: OC_LOGIN_COMMAND
+                valueFrom:
+                  secretKeyRef:
+                    name: integration-pipeline-credentials
+                    key: oc-login-command
+            script: |
+              #!/bin/sh
+              set -eux
+              
+              yum install git jq -y
+
+              # Extract component image from SNAPSHOT
+              COMPONENT_IMAGE=$(echo $SNAPSHOT | jq -r '.components[0].containerImage')
+              echo "Component image: $COMPONENT_IMAGE"
+
+              # Clone the repository
+              BRANCH_NAME="$(tasks.test-metadata.results.target-repo-branch)"
+              if [[ "$(tasks.test-metadata.results.test-event-type)" == "pull_request" ]]; then
+                BRANCH_NAME="$(tasks.test-metadata.results.source-repo-branch)"
+              fi
+              git clone "$(tasks.test-metadata.results.git-url)" -b $BRANCH_NAME .
+
+              # Login to OpenShift
+              eval $OC_LOGIN_COMMAND
+
+              # Create unique namespace for this test run
+              NS="go-coverage-http-$(date +%s)"
+              oc new-project $NS
+              echo "Created namespace: $NS"
+
+              # Update the deployment manifest with the component image and namespace
+              sed "s|image: localhost/coverage-http-demo:test|image: $COMPONENT_IMAGE|g" k8s-deployment.yaml > k8s-deployment-updated.yaml
+              sed -i "s|namespace: coverage-demo|namespace: $NS|g" k8s-deployment-updated.yaml
+              
+              # Convert NodePort Service to ClusterIP for OpenShift
+              sed -i 's|type: NodePort|type: ClusterIP|g' k8s-deployment-updated.yaml
+              sed -i '/nodePort: 30082/d' k8s-deployment-updated.yaml
+              
+              # Add OpenShift Route for external access
+              cat >> k8s-deployment-updated.yaml << EOF
+              ---
+              apiVersion: route.openshift.io/v1
+              kind: Route
+              metadata:
+                name: coverage-demo
+                namespace: $NS
+              spec:
+                to:
+                  kind: Service
+                  name: coverage-demo
+                port:
+                  targetPort: http
+                tls:
+                  termination: edge
+                  insecureEdgeTerminationPolicy: Redirect
+              EOF
+              
+              echo "Updated deployment manifest:"
+              cat k8s-deployment-updated.yaml
+              
+              # Apply the deployment
+              oc apply -f k8s-deployment-updated.yaml
+
+              # Wait for deployment to be ready
+              oc wait --for=condition=Available deployment/coverage-demo -n $NS --timeout=5m
+              oc wait --for=condition=ready pod -l app=coverage-demo -n $NS --timeout=5m
+
+              # Get the route hostname
+              ROUTE_HOST=$(oc get route coverage-demo -n $NS -o jsonpath='{.spec.host}')
+              APP_URL="https://${ROUTE_HOST}"
+              echo "Application URL: $APP_URL"
+
+              # Verify the route is accessible
+              echo "Waiting for route to be accessible..."
+              for i in {1..30}; do
+                if curl -k -f ${APP_URL}/health 2>/dev/null; then
+                  echo "✅ Route is accessible!"
+                  break
+                fi
+                echo "Attempt $i: Route not ready yet, retrying..."
+                sleep 2
+              done
+
+              echo -n "$NS" > /tekton/results/NAMESPACE
+              echo -n "$APP_URL" > /tekton/results/APP_URL
+
+    - name: run-e2e-tests
+      runAfter:
+        - deploy
+      taskSpec:
+        steps:
+          - name: run-tests
+            image: registry.access.redhat.com/ubi9/go-toolset:1.22
+            workingDir: /workspace
+            env:
+              - name: APP_NAMESPACE
+                value: $(tasks.deploy.results.NAMESPACE)
+              - name: APP_URL
+                value: $(tasks.deploy.results.APP_URL)
+              - name: OC_LOGIN_COMMAND
+                valueFrom:
+                  secretKeyRef:
+                    name: integration-pipeline-credentials
+                    key: oc-login-command
+              - name: QUAY_AUTH_SECRET
+                valueFrom:
+                  secretKeyRef:
+                    name: integration-pipeline-credentials
+                    key: quay-auth-secret
+            script: |
+              #!/bin/bash
+              set -eux
+              
+              # Install required tools
+              yum install -y git
+
+              # Clone the repository
+              BRANCH_NAME="$(tasks.test-metadata.results.target-repo-branch)"
+              if [[ "$(tasks.test-metadata.results.test-event-type)" == "pull_request" ]]; then
+                BRANCH_NAME="$(tasks.test-metadata.results.source-repo-branch)"
+              fi
+              git clone "$(tasks.test-metadata.results.git-url)" -b $BRANCH_NAME .
+
+              # Login to OpenShift (needed for kubectl access)
+              eval $OC_LOGIN_COMMAND
+
+              # Setup Docker config for quay.io authentication
+              mkdir -p ~/.docker
+              echo $QUAY_AUTH_SECRET > ~/.docker/config.json
+              echo "✅ Docker authentication configured for quay.io"
+
+              # Download Go dependencies
+              go mod download
+
+              # Run E2E tests
+              # The tests will:
+              # 1. Discover the pod using label selector
+              # 2. Port-forward to collect coverage
+              # 3. Run the E2E tests
+              # 4. Push coverage artifacts to quay.io
+              cd test
+              
+              echo "📊 Running E2E tests with coverage collection..."
+              echo "   Namespace: $APP_NAMESPACE"
+              echo "   App URL: $APP_URL"
+              
+              # Run the tests
+              # Note: The test already knows to push to quay.io/psturc/coverage-artifacts
+              go test -v ./...
+              
+              echo "✅ E2E tests completed successfully!"
+              
+              # List the coverage files that were generated
+              if [ -d coverage-output/e2e-tests ]; then
+                echo "📁 Generated coverage files:"
+                ls -lh coverage-output/e2e-tests/
+              fi
+
+    - name: cleanup
+      runAfter:
+        - run-e2e-tests
+      taskSpec:
+        steps:
+          - name: cleanup-namespace
+            image: registry.redhat.io/openshift4/ose-cli:v4.15
+            env:
+              - name: APP_NAMESPACE
+                value: $(tasks.deploy.results.NAMESPACE)
+              - name: OC_LOGIN_COMMAND
+                valueFrom:
+                  secretKeyRef:
+                    name: integration-pipeline-credentials
+                    key: oc-login-command
+            script: |
+              #!/bin/sh
+              set -eux
+              
+              # Login to OpenShift
+              eval $OC_LOGIN_COMMAND
+              
+              # Delete the namespace
+              echo "🗑️  Cleaning up namespace: $APP_NAMESPACE"
+              oc delete namespace $APP_NAMESPACE --wait=false || true
+              
+              echo "✅ Cleanup initiated"
+

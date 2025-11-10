@@ -23,24 +23,39 @@ func TestE2E(t *testing.T) {
 }
 
 const (
-	namespace     = "coverage-demo"
-	labelSelector = "app=coverage-demo"
-	targetPort    = 9095 // Coverage server port
-	coverageDir   = "./coverage-output"
-	// Use 127.0.0.1 instead of localhost to explicitly use IPv4
-	appUrl = "http://127.0.0.1:8000"
+	defaultNamespace = "coverage-demo"
+	labelSelector    = "app=coverage-demo"
+	targetPort       = 9095 // Coverage server port
+	coverageDir      = "./coverage-output"
+	defaultAppUrl    = "http://127.0.0.1:8000"
 	// Set source directory to parent directory (project root)
 	// Since tests run from ./test/, we need to go up one level
 	projectRoot = ".."
 )
 
 var (
+	namespace      string
+	appUrl         string
 	podName        string
 	coverageClient *coverageclient.CoverageClient
 )
 
 var _ = BeforeSuite(func() {
 	var err error
+
+	// Get namespace from environment or use default
+	namespace = os.Getenv("APP_NAMESPACE")
+	if namespace == "" {
+		namespace = defaultNamespace
+	}
+	GinkgoWriter.Printf("📍 Using namespace: %s\n", namespace)
+
+	// Get app URL from environment or use default
+	appUrl = os.Getenv("APP_URL")
+	if appUrl == "" {
+		appUrl = defaultAppUrl
+	}
+	GinkgoWriter.Printf("📍 App URL: %s\n", appUrl)
 
 	// Initialize coverage client
 	coverageClient, err = coverageclient.NewClient(namespace, coverageDir)
@@ -121,6 +136,9 @@ var _ = AfterSuite(func() {
 	} else {
 		GinkgoWriter.Printf("⚠️  Failed to read metadata: %v\n", err)
 	}
+
+	GinkgoWriter.Println("\n✅ Coverage data collected successfully!")
+	GinkgoWriter.Printf("📁 Coverage files in: %s/%s/\n", coverageDir, testName)
 
 	// Push coverage artifact to OCI registry
 	By("Pushing coverage artifact to OCI registry")
