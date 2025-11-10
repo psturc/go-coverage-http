@@ -76,9 +76,11 @@ stringData:
 **Note:** The base `k8s-deployment.yaml` uses NodePort for local Kind testing. The pipeline automatically converts it to ClusterIP and adds a Route for OpenShift deployments.
 
 #### Run E2E Tests Task
-- Clones the repository
-- Sets up Docker authentication for quay.io
-- Runs `go test -v ./...` in the `test/` directory
+- **Clone Repository Step**: Clones the repository to an emptyDir volume
+- **Run Tests Step**: 
+  - Uses the cloned code from the emptyDir volume
+  - Sets up Docker authentication for quay.io
+  - Runs `go test -v ./...` in the `test/` directory
 - The tests will:
   - Discover the pod using label selector
   - Port-forward to collect coverage via HTTP

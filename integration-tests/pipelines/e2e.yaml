@@ -137,10 +137,48 @@ spec:
       runAfter:
         - deploy
       taskSpec:
+        volumes:
+          - name: source
+            emptyDir: {}
         steps:
+          - name: clone-repository
+            image: registry.redhat.io/openshift-pipelines/pipelines-git-init-rhel8:v1.12
+            workingDir: /workspace/source
+            volumeMounts:
+              - name: source
+                mountPath: /workspace/source
+            env:
+              - name: GIT_URL
+                value: $(tasks.test-metadata.results.git-url)
+              - name: GIT_BRANCH
+                value: $(tasks.test-metadata.results.target-repo-branch)
+              - name: SOURCE_BRANCH
+                value: $(tasks.test-metadata.results.source-repo-branch)
+              - name: EVENT_TYPE
+                value: $(tasks.test-metadata.results.test-event-type)
+            script: |
+              #!/bin/sh
+              set -eux
+              
+              # Determine which branch to use
+              if [ "$EVENT_TYPE" = "pull_request" ]; then
+                BRANCH="$SOURCE_BRANCH"
+              else
+                BRANCH="$GIT_BRANCH"
+              fi
+              
+              echo "Cloning $GIT_URL branch $BRANCH"
+              git clone "$GIT_URL" -b "$BRANCH" /workspace/source
+              cd /workspace/source
+              echo "Repository cloned successfully"
+              ls -la
+          
           - name: run-tests
             image: registry.access.redhat.com/ubi9/go-toolset:1.22
-            workingDir: /workspace
+            workingDir: /workspace/source
+            volumeMounts:
+              - name: source
+                mountPath: /workspace/source
             env:
               - name: APP_NAMESPACE
                 value: $(tasks.deploy.results.NAMESPACE)
@@ -160,22 +198,12 @@ spec:
               #!/bin/bash
               set -eux
               
-              # Install required tools
-              yum install -y git
-
-              # Clone the repository
-              BRANCH_NAME="$(tasks.test-metadata.results.target-repo-branch)"
-              if [[ "$(tasks.test-metadata.results.test-event-type)" == "pull_request" ]]; then
-                BRANCH_NAME="$(tasks.test-metadata.results.source-repo-branch)"
-              fi
-              git clone "$(tasks.test-metadata.results.git-url)" -b $BRANCH_NAME .
-
               # Login to OpenShift (needed for kubectl access)
               eval $OC_LOGIN_COMMAND
 
               # Setup Docker config for quay.io authentication
               mkdir -p ~/.docker
-              echo $QUAY_AUTH_SECRET > ~/.docker/config.json
+              echo "$QUAY_AUTH_SECRET" > ~/.docker/config.json
               echo "✅ Docker authentication configured for quay.io"
 
               # Download Go dependencies
