@@ -39,6 +39,11 @@ func Greet(name string) string {
 func Calculate(a, b int) int {
 	if a < 0 || b < 0 {
 		return 0
+	} else if a > 1000 || b > 1000 {
+		fmt.Println("###")
+		fmt.Println("oh boy this is a big number")
+		fmt.Println("###")
+		return a + b
 	}
 	return a + b
 }
