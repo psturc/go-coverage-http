@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -99,6 +100,16 @@ var _ = Describe("Application E2E Tests", func() {
 		body, err := io.ReadAll(resp.Body)
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(body)).To(ContainSubstring("Hello, Test!"))
+	})
+
+	It("should handle greet request with long name", func() {
+		name := strings.Repeat("VeryLongName", 10)
+		resp, err := http.Get(appUrl + "/greet?name=" + name)
+		Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("Hello, " + name + "! Wow you have a long name."))
 	})
 
 	It("should handle calculate requests", func() {
