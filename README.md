@@ -32,6 +32,8 @@ Traditional coverage collection with `GOCOVERDIR` requires:
 - 🚀 **HTTP Coverage Server** - Automatically starts coverage endpoint in your app
 - 🔌 **Client Library** - Collect coverage from Kubernetes pods with port-forwarding
 - 📊 **Report Generation** - Generate text and HTML coverage reports
+- 📦 **OCI Artifact Push** - Push coverage data to container registries (quay.io, etc.)
+- 🔍 **Smart Container Detection** - Automatically identifies which container serves coverage
 - 🎯 **Minimal Setup** - Just inject one file during Docker build
 - 🐳 **Kubernetes-friendly** - No volumes, no manifest modifications
 
@@ -137,7 +139,52 @@ client.SetPathRemapping(false)
 
 This allows tools like `go tool cover` to find source files and generate HTML reports with proper source code display.
 
-### 3. Upload Coverage to Codecov (Optional)
+### 3. Push Coverage as OCI Artifact (Optional)
+
+You can push the entire coverage output directory as an OCI artifact to a container registry like quay.io. This is useful for archiving coverage data for later analysis:
+
+```go
+import "time"
+
+// Push coverage artifact to OCI registry
+pushOpts := coverageclient.PushCoverageArtifactOptions{
+    Registry:     "quay.io",
+    Repository:   "myorg/oci-artifacts",
+    Tag:          fmt.Sprintf("e2e-coverage-%s", time.Now().Format("20060102-150405")),
+    ExpiresAfter: "1y",  // Expire after 1 year (quay.io specific)
+    Title:        "E2E Coverage Data",
+}
+
+err := client.PushCoverageArtifact(ctx, "my-test", pushOpts)
+if err != nil {
+    log.Printf("Failed to push coverage artifact: %v", err)
+}
+```
+
+The artifact will include all coverage files:
+- `metadata.json` - Pod and container information
+- `coverage.out` - Raw coverage report
+- `coverage_filtered.out` - Filtered coverage report
+- `coverage.html` - HTML report (if generated)
+- Binary coverage files (`covmeta.*`, `covcounters.*`)
+
+**Authentication:** The client uses Docker credentials from `~/.docker/config.json`. Make sure you're logged in:
+
+```bash
+docker login quay.io
+```
+
+**Retrieving artifacts:**
+
+```bash
+# Pull the artifact using ORAS
+oras pull quay.io/myorg/oci-artifacts:e2e-coverage-20250110-143000
+
+# Or using Docker
+docker pull quay.io/myorg/oci-artifacts:e2e-coverage-20250110-143000
+```
+
+### 4. Upload Coverage to Codecov (Optional)
 
 Coverage data can be easily uploaded to Codecov via GitHub Actions. See the [workflow example](https://github.com/psturc/go-coverage-http/blob/main/.github/workflows/test-kind.yml) in this repository.
 

@@ -15,12 +15,20 @@ import (
 	"strings"
 	"time"
 
+	"oras.land/oras-go/v2"
+	"oras.land/oras-go/v2/content/file"
+	"oras.land/oras-go/v2/registry/remote"
+	"oras.land/oras-go/v2/registry/remote/auth"
+	"oras.land/oras-go/v2/registry/remote/credentials"
+
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/client-go/tools/portforward"
+	"k8s.io/client-go/tools/remotecommand"
 	"k8s.io/client-go/transport/spdy"
 )
 
@@ -44,6 +52,22 @@ type CoverageResponse struct {
 	CountersData     string `json:"counters_data"`
 	TestName         string `json:"test_name"`
 	Timestamp        int64  `json:"timestamp"`
+}
+
+// PodMetadata contains information about the pod from which coverage was collected
+type PodMetadata struct {
+	PodName      string            `json:"pod_name"`
+	Namespace    string            `json:"namespace"`
+	Container    ContainerMetadata `json:"container"`
+	CollectedAt  string            `json:"collected_at"`
+	TestName     string            `json:"test_name"`
+	CoveragePort int               `json:"coverage_port"`
+}
+
+// ContainerMetadata contains information about a container in the pod
+type ContainerMetadata struct {
+	Name  string `json:"name"`
+	Image string `json:"image"`
 }
 
 // NewClient creates a new coverage client for the given namespace
@@ -154,6 +178,12 @@ func (c *CoverageClient) GetPodNameWithContext(ctx context.Context, labelSelecto
 
 // CollectCoverageFromPod collects coverage data from a pod via port-forwarding
 func (c *CoverageClient) CollectCoverageFromPod(ctx context.Context, podName, testName string, targetPort int) error {
+	return c.CollectCoverageFromPodWithContainer(ctx, podName, "", testName, targetPort)
+}
+
+// CollectCoverageFromPodWithContainer collects coverage data from a specific container in a pod via port-forwarding
+// If containerName is empty, it will try to detect the correct container automatically
+func (c *CoverageClient) CollectCoverageFromPodWithContainer(ctx context.Context, podName, containerName, testName string, targetPort int) error {
 	fmt.Printf("📊 Collecting coverage from pod %s for test: %s\n", podName, testName)
 
 	// Setup port forwarding
@@ -172,6 +202,12 @@ func (c *CoverageClient) CollectCoverageFromPod(ctx context.Context, podName, te
 		return fmt.Errorf("collect coverage: %w", err)
 	}
 
+	// Get pod metadata and save it
+	if err := c.savePodMetadata(ctx, podName, containerName, testName, targetPort); err != nil {
+		// Log warning but don't fail the coverage collection
+		fmt.Printf("⚠️  Failed to save pod metadata: %v\n", err)
+	}
+
 	fmt.Printf("✅ Coverage collected successfully for test: %s\n", testName)
 	return nil
 }
@@ -179,6 +215,158 @@ func (c *CoverageClient) CollectCoverageFromPod(ctx context.Context, podName, te
 // CollectCoverageFromURL collects coverage data from a direct URL (no port-forwarding)
 func (c *CoverageClient) CollectCoverageFromURL(coverageURL, testName string) error {
 	return c.collectCoverageFromURL(coverageURL, testName)
+}
+
+// savePodMetadata retrieves pod information and saves it to metadata.json
+func (c *CoverageClient) savePodMetadata(ctx context.Context, podName, containerName, testName string, targetPort int) error {
+	// Get pod details
+	pod, err := c.clientset.CoreV1().Pods(c.namespace).Get(ctx, podName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("get pod details: %w", err)
+	}
+
+	var coverageContainer *ContainerMetadata
+
+	// If container name is explicitly provided, use it
+	if containerName != "" {
+		for _, container := range pod.Spec.Containers {
+			if container.Name == containerName {
+				coverageContainer = &ContainerMetadata{
+					Name:  container.Name,
+					Image: container.Image,
+				}
+				fmt.Printf("  🔍 Using specified container: %s (image: %s)\n", container.Name, container.Image)
+				break
+			}
+		}
+		if coverageContainer == nil {
+			return fmt.Errorf("specified container '%s' not found in pod", containerName)
+		}
+	} else {
+		// Try to detect the container that exposes the target port
+		for _, container := range pod.Spec.Containers {
+			for _, port := range container.Ports {
+				if int(port.ContainerPort) == targetPort {
+					coverageContainer = &ContainerMetadata{
+						Name:  container.Name,
+						Image: container.Image,
+					}
+					fmt.Printf("  🔍 Detected coverage container: %s (image: %s)\n", container.Name, container.Image)
+					break
+				}
+			}
+			if coverageContainer != nil {
+				break
+			}
+		}
+
+		// If no container explicitly exposes the port, try to detect by checking which one is listening
+		if coverageContainer == nil {
+			fmt.Printf("  🔍 Port %d not in container specs, detecting by checking listeners...\n", targetPort)
+			detectedContainer := c.detectContainerByPort(ctx, podName, pod.Spec.Containers, targetPort)
+			if detectedContainer != "" {
+				for _, container := range pod.Spec.Containers {
+					if container.Name == detectedContainer {
+						coverageContainer = &ContainerMetadata{
+							Name:  container.Name,
+							Image: container.Image,
+						}
+						fmt.Printf("  🔍 Detected container listening on port %d: %s (image: %s)\n", targetPort, container.Name, container.Image)
+						break
+					}
+				}
+			}
+		}
+
+		// Final fallback: use first container
+		if coverageContainer == nil {
+			if len(pod.Spec.Containers) > 0 {
+				fmt.Printf("  ⚠️  Could not detect coverage container, using first container\n")
+				coverageContainer = &ContainerMetadata{
+					Name:  pod.Spec.Containers[0].Name,
+					Image: pod.Spec.Containers[0].Image,
+				}
+			} else {
+				return fmt.Errorf("no containers found in pod")
+			}
+		}
+	}
+
+	// Create metadata structure
+	metadata := PodMetadata{
+		PodName:      podName,
+		Namespace:    c.namespace,
+		Container:    *coverageContainer,
+		CollectedAt:  time.Now().Format(time.RFC3339),
+		TestName:     testName,
+		CoveragePort: targetPort,
+	}
+
+	// Marshal to JSON
+	jsonData, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return fmt.Errorf("marshal metadata to JSON: %w", err)
+	}
+
+	// Save to file in the test directory
+	testDir := filepath.Join(c.outputDir, testName)
+	metadataPath := filepath.Join(testDir, "metadata.json")
+
+	if err := os.WriteFile(metadataPath, jsonData, 0644); err != nil {
+		return fmt.Errorf("write metadata file: %w", err)
+	}
+
+	fmt.Printf("  📁 Saved: %s\n", metadataPath)
+	return nil
+}
+
+// detectContainerByPort tries to detect which container is listening on the specified port
+func (c *CoverageClient) detectContainerByPort(ctx context.Context, podName string, containers []corev1.Container, targetPort int) string {
+	for _, container := range containers {
+		// Try to check if the port is listening in this container
+		// We'll use netstat or ss to check for listening ports
+		cmd := []string{"sh", "-c", fmt.Sprintf("netstat -tln 2>/dev/null | grep ':%d ' || ss -tln 2>/dev/null | grep ':%d '", targetPort, targetPort)}
+
+		req := c.clientset.CoreV1().RESTClient().
+			Post().
+			Resource("pods").
+			Name(podName).
+			Namespace(c.namespace).
+			SubResource("exec").
+			Param("container", container.Name).
+			Param("command", cmd[0]).
+			Param("command", cmd[1]).
+			Param("command", cmd[2]).
+			Param("stdout", "true").
+			Param("stderr", "true")
+
+		exec, err := c.createExecutor(req)
+		if err != nil {
+			continue
+		}
+
+		var stdout, stderr bytes.Buffer
+		err = exec.StreamWithContext(ctx, remotecommand.StreamOptions{
+			Stdout: &stdout,
+			Stderr: &stderr,
+		})
+
+		// If command succeeded and found the port, this is our container
+		if err == nil && stdout.Len() > 0 {
+			return container.Name
+		}
+	}
+
+	return ""
+}
+
+// createExecutor creates a remote command executor
+func (c *CoverageClient) createExecutor(req *rest.Request) (remotecommand.Executor, error) {
+	exec, err := remotecommand.NewSPDYExecutor(c.restConfig, "POST", req.URL())
+	if err != nil {
+		return nil, err
+	}
+	return exec, nil
 }
 
 // setupPortForward sets up port forwarding to the pod
@@ -454,6 +642,134 @@ func (c *CoverageClient) ProcessCoverageReports(testName string) error {
 		// HTML generation might fail if source files aren't available, log but don't fail
 		fmt.Printf("⚠️  HTML report generation failed (source files may not be available): %v\n", err)
 	}
+
+	return nil
+}
+
+// PushCoverageArtifactOptions contains options for pushing coverage artifacts to OCI registry
+type PushCoverageArtifactOptions struct {
+	Registry     string            // Registry URL (e.g., "quay.io")
+	Repository   string            // Repository name (e.g., "psturc/oci-artifacts")
+	Tag          string            // Tag for the artifact (e.g., "test-coverage-v1")
+	ExpiresAfter string            // Expiration time (e.g., "1y", "30d")
+	Title        string            // Artifact title
+	Annotations  map[string]string // Additional annotations
+}
+
+// PushCoverageArtifact pushes the coverage output directory as an OCI artifact to a registry
+func (c *CoverageClient) PushCoverageArtifact(ctx context.Context, testName string, opts PushCoverageArtifactOptions) error {
+	testDir := filepath.Join(c.outputDir, testName)
+
+	fmt.Printf("📦 Pushing coverage artifact for test: %s\n", testName)
+	fmt.Printf("   Registry: %s/%s:%s\n", opts.Registry, opts.Repository, opts.Tag)
+	fmt.Printf("   Source directory: %s\n", testDir)
+
+	// Verify directory exists and has files
+	if _, err := os.Stat(testDir); os.IsNotExist(err) {
+		return fmt.Errorf("test directory does not exist: %s", testDir)
+	}
+
+	// Create a file store for the test directory
+	fmt.Printf("   Creating file store...\n")
+	fs, err := file.New(testDir)
+	if err != nil {
+		return fmt.Errorf("create file store: %w", err)
+	}
+	defer fs.Close()
+	fmt.Printf("   ✓ File store created\n")
+
+	// Add all files from the test directory
+	mediaType := "application/vnd.acme.rocket.docs.layer.v1+tar"
+	fileDescriptors := []ocispec.Descriptor{}
+
+	files, err := os.ReadDir(testDir)
+	if err != nil {
+		return fmt.Errorf("read test directory: %w", err)
+	}
+
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+
+		filePath := filepath.Join(testDir, file.Name())
+		fileInfo, err := os.Stat(filePath)
+		if err != nil {
+			continue
+		}
+
+		// Add file to the store (file store is based at testDir, so we only need the filename)
+		desc, err := fs.Add(ctx, file.Name(), mediaType, file.Name())
+		if err != nil {
+			return fmt.Errorf("add file %s to store: %w", file.Name(), err)
+		}
+		fileDescriptors = append(fileDescriptors, desc)
+		fmt.Printf("   📄 Added: %s (%d bytes)\n", file.Name(), fileInfo.Size())
+	}
+
+	// Pack the files and tag the packed manifest
+	fmt.Printf("   Packing manifest with %d files...\n", len(fileDescriptors))
+	artifactType := "application/vnd.acme.rocket.config"
+
+	// Initialize annotations if not already set
+	if opts.Annotations == nil {
+		opts.Annotations = make(map[string]string)
+	}
+
+	if opts.ExpiresAfter != "" {
+		opts.Annotations["quay.expires-after"] = opts.ExpiresAfter
+	}
+	if opts.Title != "" {
+		opts.Annotations[ocispec.AnnotationTitle] = opts.Title
+	}
+
+	packOpts := oras.PackManifestOptions{
+		Layers:              fileDescriptors,
+		ManifestAnnotations: opts.Annotations,
+	}
+
+	manifestDesc, err := oras.PackManifest(ctx, fs, oras.PackManifestVersion1_1_RC4, artifactType, packOpts)
+	if err != nil {
+		return fmt.Errorf("pack manifest: %w", err)
+	}
+	fmt.Printf("   ✓ Manifest packed\n")
+
+	if err = fs.Tag(ctx, manifestDesc, opts.Tag); err != nil {
+		return fmt.Errorf("tag manifest: %w", err)
+	}
+	fmt.Printf("   ✓ Manifest tagged: %s\n", opts.Tag)
+
+	// Setup remote repository
+	fmt.Printf("   Connecting to registry %s/%s...\n", opts.Registry, opts.Repository)
+	repo, err := remote.NewRepository(fmt.Sprintf("%s/%s", opts.Registry, opts.Repository))
+	if err != nil {
+		return fmt.Errorf("create remote repository: %w", err)
+	}
+
+	// Setup authentication using Docker credentials
+	fmt.Printf("   Setting up authentication...\n")
+	storeOpts := credentials.StoreOptions{}
+	credStore, err := credentials.NewStoreFromDocker(storeOpts)
+	if err != nil {
+		return fmt.Errorf("create credential store: %w", err)
+	}
+
+	repo.Client = &auth.Client{
+		Client:     http.DefaultClient,
+		Cache:      auth.NewCache(),
+		Credential: credentials.Credential(credStore),
+	}
+	fmt.Printf("   ✓ Authentication configured\n")
+
+	// Copy from file store to remote repository
+	fmt.Printf("   Pushing to registry...\n")
+	_, err = oras.Copy(ctx, fs, opts.Tag, repo, opts.Tag, oras.DefaultCopyOptions)
+	if err != nil {
+		return fmt.Errorf("push artifact: %w", err)
+	}
+
+	fmt.Printf("✅ Coverage artifact pushed successfully\n")
+	fmt.Printf("   Location: %s/%s:%s\n", opts.Registry, opts.Repository, opts.Tag)
 
 	return nil
 }

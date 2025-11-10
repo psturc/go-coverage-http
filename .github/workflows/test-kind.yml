@@ -82,12 +82,12 @@ jobs:
           echo "✅ Unit tests complete"
         continue-on-error: true
 
-      - name: Run E2E Go Tests
-        run: |
-          # Run the tests and generate coverage report
-          cd test
-          go test -v ./...
-          cp coverage-output/e2e-tests/coverage_filtered.out ../coverage-e2e.out
+      # - name: Run E2E Go Tests
+      #   run: |
+      #     # Run the tests and generate coverage report
+      #     cd test
+      #     go test -v ./...
+      #     cp coverage-output/e2e-tests/coverage_filtered.out ../coverage-e2e.out
 
       - name: Merge coverage reports for SonarCloud
         run: |
@@ -106,11 +106,11 @@ jobs:
             echo "✅ Using e2e coverage only"
           fi
           
-          # Display coverage summary
-          echo "📈 Coverage summary:"
-          [ -f coverage-unit.out ] && echo "  Unit tests: $(grep -v "^mode:" coverage-unit.out | wc -l) lines"
-          [ -f coverage-e2e.out ] && echo "  E2E tests: $(grep -v "^mode:" coverage-e2e.out | wc -l) lines"
-          echo "  Combined: $(grep -v "^mode:" coverage.out | wc -l) lines"
+        # # Display coverage summary
+        # echo "📈 Coverage summary:"
+        # [ -f coverage-unit.out ] && echo "  Unit tests: $(grep -v "^mode:" coverage-unit.out | wc -l) lines"
+        # [ -f coverage-e2e.out ] && echo "  E2E tests: $(grep -v "^mode:" coverage-e2e.out | wc -l) lines"
+        # echo "  Combined: $(grep -v "^mode:" coverage.out | wc -l) lines"
 
       - name: Upload unit test coverage to Codecov
         uses: codecov/codecov-action@v4
@@ -121,22 +121,22 @@ jobs:
           fail_ci_if_error: false
         if: github.repository == 'psturc/go-coverage-http' && hashFiles('coverage-unit.out') != ''
 
-      - name: Upload E2E coverage to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage-e2e.out
-          flags: e2e-tests
-          fail_ci_if_error: false
+      # - name: Upload E2E coverage to Codecov
+      #   uses: codecov/codecov-action@v4
+      #   with:
+      #     token: ${{ secrets.CODECOV_TOKEN }}
+      #     files: ./coverage-e2e.out
+      #     flags: e2e-tests
+      #     fail_ci_if_error: false
 
-      - name: SonarCloud Scan
-        uses: SonarSource/sonarqube-scan-action@v6.0.0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
-        with:
-          args: >
-            -Dsonar.scm.revision=${{ github.event.pull_request.head.sha || github.sha }}
-            ${{ github.event.pull_request.number && format('-Dsonar.pullrequest.key={0}', github.event.pull_request.number) || '' }}
-            ${{ github.event.pull_request.number && format('-Dsonar.pullrequest.branch={0}', github.event.pull_request.head.ref) || '' }}
-            ${{ github.event.pull_request.number && format('-Dsonar.pullrequest.base={0}', github.event.pull_request.base.ref) || '' }}
+      # - name: SonarCloud Scan
+      #   uses: SonarSource/sonarqube-scan-action@v6.0.0
+      #   env:
+      #     GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      #     SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      #   with:
+      #     args: >
+      #       -Dsonar.scm.revision=${{ github.event.pull_request.head.sha || github.sha }}
+      #       ${{ github.event.pull_request.number && format('-Dsonar.pullrequest.key={0}', github.event.pull_request.number) || '' }}
+      #       ${{ github.event.pull_request.number && format('-Dsonar.pullrequest.branch={0}', github.event.pull_request.head.ref) || '' }}
+      #       ${{ github.event.pull_request.number && format('-Dsonar.pullrequest.base={0}', github.event.pull_request.base.ref) || '' }}

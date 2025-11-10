@@ -2,8 +2,12 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -41,6 +45,8 @@ var _ = BeforeSuite(func() {
 	// Initialize coverage client
 	coverageClient, err = coverageclient.NewClient(namespace, coverageDir)
 	Expect(err).NotTo(HaveOccurred(), "Failed to create coverage client")
+
+	coverageClient.SetPathRemapping(false)
 
 	coverageClient.SetSourceDirectory(projectRoot)
 	GinkgoWriter.Printf("✅ Coverage client initialized (source dir: %s)\n", projectRoot)
@@ -89,22 +95,55 @@ var _ = AfterSuite(func() {
 
 	testName := "e2e-tests"
 
-	// Collect coverage from pod
+	// Collect coverage from pod (this also saves metadata.json)
+	// The client will try to auto-detect which container is serving coverage on port 9095
+	// If you know the container name, you can use: CollectCoverageFromPodWithContainer(ctx, podName, "app", testName, targetPort)
 	err := coverageClient.CollectCoverageFromPod(ctx, podName, testName, targetPort)
 	Expect(err).NotTo(HaveOccurred(), "Failed to collect coverage")
 
-	// Process coverage reports (generate, filter, and create HTML)
-	By("Processing coverage reports")
-	err = coverageClient.ProcessCoverageReports(testName)
-	Expect(err).NotTo(HaveOccurred(), "Failed to process coverage reports")
-
-	// Print coverage summary
-	By("Printing coverage summary")
-	err = coverageClient.PrintCoverageSummary(testName)
-	if err != nil {
-		GinkgoWriter.Printf("⚠️  Failed to print summary: %v\n", err)
+	// Read and display pod metadata
+	By("Reading pod metadata")
+	metadataPath := filepath.Join(coverageDir, testName, "metadata.json")
+	if metadataData, err := os.ReadFile(metadataPath); err == nil {
+		var metadata map[string]interface{}
+		if err := json.Unmarshal(metadataData, &metadata); err == nil {
+			GinkgoWriter.Println("\n📋 Pod Metadata:")
+			GinkgoWriter.Printf("  Pod Name: %v\n", metadata["pod_name"])
+			GinkgoWriter.Printf("  Namespace: %v\n", metadata["namespace"])
+			GinkgoWriter.Printf("  Coverage Port: %v\n", metadata["coverage_port"])
+			if container, ok := metadata["container"].(map[string]interface{}); ok {
+				GinkgoWriter.Println("  Coverage Container:")
+				GinkgoWriter.Printf("    Name: %v\n", container["name"])
+				GinkgoWriter.Printf("    Image: %v\n", container["image"])
+			}
+			GinkgoWriter.Printf("  Collected At: %v\n", metadata["collected_at"])
+		}
+	} else {
+		GinkgoWriter.Printf("⚠️  Failed to read metadata: %v\n", err)
 	}
 
-	GinkgoWriter.Println("\n✅ Coverage collection complete!")
-	GinkgoWriter.Printf("📊 Reports in: %s/%s/\n", coverageDir, testName)
+	// Push coverage artifact to OCI registry
+	By("Pushing coverage artifact to OCI registry")
+
+	// Create a new context with longer timeout specifically for the push operation
+	pushCtx, pushCancel := context.WithTimeout(context.Background(), 120*time.Second)
+	defer pushCancel()
+
+	pushOpts := coverageclient.PushCoverageArtifactOptions{
+		Registry:     "quay.io",
+		Repository:   "psturc/coverage-artifacts",
+		Tag:          fmt.Sprintf("e2e-coverage-%s", time.Now().Format("20060102-150405")),
+		ExpiresAfter: "1y",
+		Title:        "Artifact for storing E2E coverage data",
+	}
+
+	GinkgoWriter.Printf("   Target: %s/%s:%s\n", pushOpts.Registry, pushOpts.Repository, pushOpts.Tag)
+	err = coverageClient.PushCoverageArtifact(pushCtx, testName, pushOpts)
+	if err != nil {
+		GinkgoWriter.Printf("\n⚠️  Failed to push coverage artifact: %v\n", err)
+		GinkgoWriter.Println("   (This is non-fatal - coverage data is still saved locally)")
+	} else {
+		GinkgoWriter.Printf("\n✅ Coverage artifact pushed successfully!\n")
+		GinkgoWriter.Printf("   Location: %s/%s:%s\n", pushOpts.Registry, pushOpts.Repository, pushOpts.Tag)
+	}
 })
