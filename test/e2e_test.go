@@ -23,11 +23,11 @@ func TestE2E(t *testing.T) {
 }
 
 const (
-	defaultNamespace = "coverage-demo"
-	labelSelector    = "app=coverage-demo"
-	targetPort       = 9095 // Coverage server port
-	coverageDir      = "./coverage-output"
-	defaultAppUrl    = "http://127.0.0.1:8000"
+	defaultNamespace   = "coverage-demo"
+	labelSelector      = "app=coverage-demo"
+	targetPort         = 9095 // Coverage server port
+	defaultCoverageDir = "./coverage-output"
+	defaultAppUrl      = "http://127.0.0.1:8000"
 	// Set source directory to parent directory (project root)
 	// Since tests run from ./test/, we need to go up one level
 	projectRoot = ".."
@@ -37,6 +37,7 @@ var (
 	namespace      string
 	appUrl         string
 	podName        string
+	coverageDir    string
 	coverageClient *coverageclient.CoverageClient
 )
 
@@ -56,6 +57,13 @@ var _ = BeforeSuite(func() {
 		appUrl = defaultAppUrl
 	}
 	GinkgoWriter.Printf("📍 App URL: %s\n", appUrl)
+
+	// Get coverage directory from environment or use default
+	coverageDir = os.Getenv("COVERAGE_OUTPUT_DIR")
+	if coverageDir == "" {
+		coverageDir = defaultCoverageDir
+	}
+	GinkgoWriter.Printf("📍 Coverage directory: %s\n", coverageDir)
 
 	// Initialize coverage client
 	coverageClient, err = coverageclient.NewClient(namespace, coverageDir)

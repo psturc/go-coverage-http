@@ -184,6 +184,8 @@ spec:
                 value: $(tasks.deploy.results.NAMESPACE)
               - name: APP_URL
                 value: $(tasks.deploy.results.APP_URL)
+              - name: COVERAGE_OUTPUT_DIR
+                value: /tmp/coverage-output
               - name: OC_LOGIN_COMMAND
                 valueFrom:
                   secretKeyRef:
@@ -219,6 +221,12 @@ spec:
               # Download Go dependencies
               go mod download
 
+              # Create coverage output directory (already set via environment variable)
+              # The go-toolset image runs as non-root and can't write to /workspace/source
+              mkdir -p "$COVERAGE_OUTPUT_DIR"
+              chmod 777 "$COVERAGE_OUTPUT_DIR"
+              echo "✅ Coverage output directory: $COVERAGE_OUTPUT_DIR"
+              
               # Run E2E tests
               # The tests will:
               # 1. Discover the pod using label selector
@@ -230,6 +238,7 @@ spec:
               echo "📊 Running E2E tests with coverage collection..."
               echo "   Namespace: $APP_NAMESPACE"
               echo "   App URL: $APP_URL"
+              echo "   Coverage Dir: $COVERAGE_OUTPUT_DIR"
               
               # Run the tests
               # Note: The test already knows to push to quay.io/psturc/coverage-artifacts
@@ -238,9 +247,9 @@ spec:
               echo "✅ E2E tests completed successfully!"
               
               # List the coverage files that were generated
-              if [ -d coverage-output/e2e-tests ]; then
+              if [ -d "$COVERAGE_OUTPUT_DIR/e2e-tests" ]; then
                 echo "📁 Generated coverage files:"
-                ls -lh coverage-output/e2e-tests/
+                ls -lh "$COVERAGE_OUTPUT_DIR/e2e-tests/"
               fi
 
     - name: cleanup

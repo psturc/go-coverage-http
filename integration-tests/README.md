@@ -234,6 +234,9 @@ The E2E tests support the following environment variables:
   - **Konflux pipeline**: Set to Route URL `https://coverage-demo-namespace.apps.cluster.com`
   - **Local Kind**: Uses default `http://127.0.0.1:8000` (NodePort)
   - **Manual OpenShift**: Set to Route URL if you create a Route
+- `COVERAGE_OUTPUT_DIR` - Directory for coverage output (default: `./coverage-output`)
+  - **Konflux pipeline**: Set to `/tmp/coverage-output` (writable location)
+  - **Local**: Uses default `./coverage-output` in project directory
 
 These are automatically set by the pipeline but can be overridden for local testing.
 
