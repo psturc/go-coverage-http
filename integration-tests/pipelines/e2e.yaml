@@ -198,6 +198,16 @@ spec:
               #!/bin/bash
               set -eux
               
+              # Download and install oc binary
+              echo "📥 Downloading oc binary..."
+              curl -sL https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/oc/latest/linux/oc.tar.gz -o /tmp/oc.tar.gz
+              tar -xzf /tmp/oc.tar.gz -C /tmp
+              chmod +x /tmp/oc
+              export PATH=/tmp:$PATH
+              
+              # Verify oc is available
+              oc version --client
+              
               # Login to OpenShift (needed for kubectl access)
               eval $OC_LOGIN_COMMAND
 
