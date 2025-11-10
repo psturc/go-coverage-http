@@ -40,7 +40,7 @@ spec:
             description: The base URL of the deployed service
         steps:
           - name: deploy-application
-            image: registry.redhat.io/openshift4/ose-cli:v4.15
+            image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest
             workingDir: /workspace
             env:
               - name: JOB_SPEC
@@ -142,7 +142,7 @@ spec:
             emptyDir: {}
         steps:
           - name: clone-repository
-            image: registry.redhat.io/openshift-pipelines/pipelines-git-init-rhel8:v1.12
+            image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest
             workingDir: /workspace/source
             volumeMounts:
               - name: source
@@ -239,7 +239,7 @@ spec:
       taskSpec:
         steps:
           - name: cleanup-namespace
-            image: registry.redhat.io/openshift4/ose-cli:v4.15
+            image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest
             env:
               - name: APP_NAMESPACE
                 value: $(tasks.deploy.results.NAMESPACE)
