@@ -56,7 +56,10 @@ stringData:
    ```bash
    kubectl create secret generic integration-pipeline-credentials \
      --from-literal=oc-login-command="oc login https://..." \
-     --from-literal=quay-auth-secret='{"auths":{"quay.io":{"auth":"...","email":""}}}'
+     --from-literal=quay-auth-secret='{"auths":{"quay.io":{"auth":"...","email":""}}}' \
+     --from-literal=codecov-token="your-codecov-token-here"
+   
+   # Note: codecov-token is optional - if not provided, the Codecov upload step will be skipped
    ```
 
 ### What the Pipeline Does
@@ -86,8 +89,25 @@ stringData:
   - Port-forward to collect coverage via HTTP
   - Collect binary coverage data and metadata
   - Push coverage artifacts to `quay.io/psturc/coverage-artifacts` as OCI artifacts
+- **Outputs**: `COVERAGE_ARTIFACT_REF` - Full OCI reference to the coverage artifact
+
+#### Process Coverage Task
+This task processes the coverage data and uploads it to Codecov. It runs after the E2E tests task and receives the artifact reference.
+
+- **Extract Coverage Artifact**: Pulls the OCI artifact using ORAS and extracts `metadata.json`
+- **Extract Git Metadata**: Uses cosign to download attestation from the tested image and extracts:
+  - Repository URL (from `pipelinesascode.tekton.dev/repo-url` annotation)
+  - Commit SHA (from `build.appstudio.redhat.com/commit_sha` annotation)
+- **Clone Repository**: Clones the source repository at the exact commit that was tested
+- **Process Coverage**: Converts binary coverage data to text format using `go tool covdata textfmt`
+- **Upload to Codecov**: Uploads the processed coverage to Codecov (if `codecov-token` is configured)
+
+**Note**: This task will gracefully skip if:
+- No coverage artifact was pushed (when `COVERAGE_ARTIFACT_REF = "not-available"`)
+- Codecov token is not configured (optional - add `codecov-token` key to `integration-pipeline-credentials` secret)
 
 #### Cleanup Task
+- Runs after coverage processing completes
 - Deletes the test namespace
 
 ### Coverage Artifacts
@@ -237,6 +257,10 @@ The E2E tests support the following environment variables:
 - `COVERAGE_OUTPUT_DIR` - Directory for coverage output (default: `./coverage-output`)
   - **Konflux pipeline**: Set to `/tmp/coverage-output` (writable location)
   - **Local**: Uses default `./coverage-output` in project directory
+- `PUSH_COVERAGE_ARTIFACT` - Enable pushing coverage artifacts to OCI registry (default: disabled)
+  - **Konflux pipeline**: Set to `true` to push to `quay.io/psturc/coverage-artifacts`
+  - **Local**: Not set by default (coverage saved locally only)
+  - Requires Docker authentication configured in `~/.docker/config.json`
 
 These are automatically set by the pipeline but can be overridden for local testing.
 

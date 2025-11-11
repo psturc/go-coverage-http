@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 )
 
 func main() {
@@ -63,6 +64,18 @@ func GreetHandler(w http.ResponseWriter, r *http.Request) {
 
 // CalculateHandler handles calculation requests
 func CalculateHandler(w http.ResponseWriter, r *http.Request) {
-	result := Calculate(5, 10)
+	a := r.URL.Query().Get("a")
+	b := r.URL.Query().Get("b")
+	sa, err := strconv.Atoi(a)
+	if err != nil {
+		http.Error(w, "Invalid a parameter", http.StatusBadRequest)
+		return
+	}
+	sb, err := strconv.Atoi(b)
+	if err != nil {
+		http.Error(w, "Invalid b parameter", http.StatusBadRequest)
+		return
+	}
+	result := Calculate(sa, sb)
 	fmt.Fprintf(w, `{"result":%d}`, result)
 }

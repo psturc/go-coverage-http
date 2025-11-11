@@ -141,7 +141,9 @@ This allows tools like `go tool cover` to find source files and generate HTML re
 
 ### 3. Push Coverage as OCI Artifact (Optional)
 
-You can push the entire coverage output directory as an OCI artifact to a container registry like quay.io. This is useful for archiving coverage data for later analysis:
+You can push the entire coverage output directory as an OCI artifact to a container registry like quay.io. This is useful for archiving coverage data for later analysis.
+
+**Note:** The E2E tests only push when `PUSH_COVERAGE_ARTIFACT=true` environment variable is set.
 
 ```go
 import "time"
@@ -201,12 +203,19 @@ kubectl apply -f k8s-deployment.yaml
 
 # Run E2E tests (will collect coverage automatically)
 cd test && go test -v
+
+# Optional: Enable OCI artifact push
+# Make sure you're logged in to the registry first
+docker login quay.io
+export PUSH_COVERAGE_ARTIFACT=true
+go test -v
 ```
 
 The E2E tests will:
 - Execute requests against the running pod
 - Collect coverage data via port-forwarding
 - Generate text and HTML reports in `./coverage-output/`
+- Push coverage artifacts to OCI registry (if `PUSH_COVERAGE_ARTIFACT=true`)
 
 ### Example Files
 

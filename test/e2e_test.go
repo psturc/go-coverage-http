@@ -113,7 +113,7 @@ var _ = Describe("Application E2E Tests", func() {
 	})
 
 	It("should handle calculate requests", func() {
-		resp, err := http.Get(appUrl + "/calculate")
+		resp, err := http.Get(appUrl + "/calculate?a=10&b=5")
 		Expect(err).NotTo(HaveOccurred())
 		defer resp.Body.Close()
 		body, err := io.ReadAll(resp.Body)
@@ -168,28 +168,44 @@ var _ = AfterSuite(func() {
 	GinkgoWriter.Println("\n✅ Coverage data collected successfully!")
 	GinkgoWriter.Printf("📁 Coverage files in: %s/%s/\n", coverageDir, testName)
 
-	// Push coverage artifact to OCI registry
-	By("Pushing coverage artifact to OCI registry")
+	// Push coverage artifact to OCI registry (only if enabled via environment variable)
+	if os.Getenv("PUSH_COVERAGE_ARTIFACT") == "true" {
+		By("Pushing coverage artifact to OCI registry")
 
-	// Create a new context with longer timeout specifically for the push operation
-	pushCtx, pushCancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer pushCancel()
+		// Create a new context with longer timeout specifically for the push operation
+		pushCtx, pushCancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer pushCancel()
 
-	pushOpts := coverageclient.PushCoverageArtifactOptions{
-		Registry:     "quay.io",
-		Repository:   "psturc/coverage-artifacts",
-		Tag:          fmt.Sprintf("e2e-coverage-%s", time.Now().Format("20060102-150405")),
-		ExpiresAfter: "1y",
-		Title:        "Artifact for storing E2E coverage data",
-	}
+		pushOpts := coverageclient.PushCoverageArtifactOptions{
+			Registry:     "quay.io",
+			Repository:   "psturc/coverage-artifacts",
+			Tag:          fmt.Sprintf("e2e-coverage-%s", time.Now().Format("20060102-150405")),
+			ExpiresAfter: "1y",
+			Title:        "Artifact for storing E2E coverage data",
+		}
 
-	GinkgoWriter.Printf("   Target: %s/%s:%s\n", pushOpts.Registry, pushOpts.Repository, pushOpts.Tag)
-	err = coverageClient.PushCoverageArtifact(pushCtx, testName, pushOpts)
-	if err != nil {
-		GinkgoWriter.Printf("\n⚠️  Failed to push coverage artifact: %v\n", err)
-		GinkgoWriter.Println("   (This is non-fatal - coverage data is still saved locally)")
+		artifactRef := fmt.Sprintf("%s/%s:%s", pushOpts.Registry, pushOpts.Repository, pushOpts.Tag)
+		GinkgoWriter.Printf("   Target: %s\n", artifactRef)
+
+		err = coverageClient.PushCoverageArtifact(pushCtx, testName, pushOpts)
+		if err != nil {
+			GinkgoWriter.Printf("\n⚠️  Failed to push coverage artifact: %v\n", err)
+			GinkgoWriter.Println("   (This is non-fatal - coverage data is still saved locally)")
+		} else {
+			GinkgoWriter.Printf("\n✅ Coverage artifact pushed successfully!\n")
+			GinkgoWriter.Printf("   Location: %s\n", artifactRef)
+
+			// Write artifact reference to file for Tekton pipeline
+			if artifactRefPath := os.Getenv("COVERAGE_ARTIFACT_REF_FILE"); artifactRefPath != "" {
+				if err := os.WriteFile(artifactRefPath, []byte(artifactRef), 0644); err != nil {
+					GinkgoWriter.Printf("⚠️  Failed to write artifact ref to %s: %v\n", artifactRefPath, err)
+				} else {
+					GinkgoWriter.Printf("📝 Artifact reference saved to: %s\n", artifactRefPath)
+				}
+			}
+		}
 	} else {
-		GinkgoWriter.Printf("\n✅ Coverage artifact pushed successfully!\n")
-		GinkgoWriter.Printf("   Location: %s/%s:%s\n", pushOpts.Registry, pushOpts.Repository, pushOpts.Tag)
+		GinkgoWriter.Println("\n💾 Coverage artifacts saved locally (OCI push disabled)")
+		GinkgoWriter.Println("   Set PUSH_COVERAGE_ARTIFACT=true to enable pushing to registry")
 	}
 })
