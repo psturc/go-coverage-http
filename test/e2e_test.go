@@ -138,6 +138,15 @@ var _ = Describe("Application E2E Tests", func() {
 		Expect(err).NotTo(HaveOccurred())
 		Expect(string(body)).To(ContainSubstring("2002"))
 	})
+
+	It("should refuse to calculate with negative numbers and return 0", func() {
+		resp, err := http.Get(appUrl + "/calculate?a=-10&b=10")
+		Expect(err).NotTo(HaveOccurred())
+		defer resp.Body.Close()
+		body, err := io.ReadAll(resp.Body)
+		Expect(err).NotTo(HaveOccurred())
+		Expect(string(body)).To(ContainSubstring("0"))
+	})
 })
 
 var _ = AfterSuite(func() {
