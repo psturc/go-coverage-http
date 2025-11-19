@@ -192,12 +192,40 @@ spec:
                 value: $(tasks.deploy.results.NAMESPACE)
               - name: APP_URL
                 value: $(tasks.deploy.results.APP_URL)
+              - name: COVERAGE_OUTPUT_DIR
+                value: /tmp/coverage-output
+              - name: PUSH_COVERAGE_ARTIFACT
+                value: "false"
+              - name: OC_LOGIN_COMMAND
+                valueFrom:
+                  secretKeyRef:
+                    name: integration-pipeline-credentials
+                    key: oc-login-command
             script: |
               #!/bin/bash
               set -eu
               
+              # Download and install oc binary
+              echo "📥 Downloading oc binary..."
+              curl -sL https://mirror.openshift.com/pub/openshift-v4/x86_64/clients/oc/latest/linux/oc.tar.gz -o /tmp/oc.tar.gz
+              tar -xzf /tmp/oc.tar.gz -C /tmp
+              chmod +x /tmp/oc
+              export PATH=/tmp:$PATH
+              
+              # Verify oc is available
+              oc version --client
+              
+              # Login to OpenShift (needed for kubectl access)
+              eval $OC_LOGIN_COMMAND
+
               # Download Go dependencies
               go mod download
+
+              # Create coverage output directory (already set via environment variable)
+              # The go-toolset image runs as non-root and can't write to /workspace/source
+              mkdir -p "$COVERAGE_OUTPUT_DIR"
+              chmod 777 "$COVERAGE_OUTPUT_DIR"
+              echo "✅ Coverage output directory: $COVERAGE_OUTPUT_DIR"
               
               # Run E2E tests
               # These tests exercise the deployed instrumented application
