@@ -218,7 +218,7 @@ spec:
         - run-e2e-tests
       params:
         - name: instrumented-images
-          value: $(params.SNAPSHOT[*].components[0].containerImage)
+          value: $(results.test-metadata.container-image)
         - name: cluster-access-secret-name
           value: $(params.CLUSTER_ACCESS_SECRET)
         - name: test-name
