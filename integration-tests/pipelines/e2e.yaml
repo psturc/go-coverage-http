@@ -183,6 +183,13 @@ spec:
           
           - name: run-tests
             image: registry.access.redhat.com/ubi9/go-toolset:1.24
+            computeResources:
+              requests:
+                memory: "2Gi"
+                cpu: "1000m"
+              limits:
+                memory: "4Gi"
+                cpu: "2000m"
             workingDir: /workspace/source
             volumeMounts:
               - name: source
