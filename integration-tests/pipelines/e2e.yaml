@@ -6,12 +6,20 @@ spec:
   description: |
     Integration test pipeline for go-coverage-http that:
     - Deploys the instrumented Go application to OpenShift
-    - Runs E2E tests with coverage collection
-    - Pushes coverage artifacts to quay.io as OCI artifacts
+    - Runs E2E tests
+    - Uses coverport to collect, push, and upload coverage to Codecov
   params:
     - description: Snapshot of the application
       name: SNAPSHOT
       type: string
+    - description: Name of the secret containing cluster access kubeconfig
+      name: CLUSTER_ACCESS_SECRET
+      type: string
+      default: integration-pipeline-credentials
+    - description: Name of the secret containing OCI registry and Codecov credentials
+      name: COVERPORT_SECRET
+      type: string
+      default: integration-pipeline-credentials
   tasks:
     - name: test-metadata
       params:
@@ -54,7 +62,7 @@ spec:
                     key: oc-login-command
             script: |
               #!/bin/sh
-              set -eux
+              set -eu
               
               yum install git jq -y
 
@@ -137,9 +145,6 @@ spec:
       runAfter:
         - deploy
       taskSpec:
-        results:
-          - name: COVERAGE_ARTIFACT_REF
-            description: Full OCI reference to the coverage artifact
         volumes:
           - name: source
             emptyDir: {}
@@ -161,7 +166,7 @@ spec:
                 value: $(tasks.test-metadata.results.test-event-type)
             script: |
               #!/bin/sh
-              set -eux
+              set -eu
               
               # Determine which branch to use
               if [ "$EVENT_TYPE" = "pull_request" ]; then
@@ -178,6 +183,13 @@ spec:
           
           - name: run-tests
             image: registry.access.redhat.com/ubi9/go-toolset:1.24
+            computeResources:
+              requests:
+                memory: "2Gi"
+                cpu: "1000m"
+              limits:
+                memory: "4Gi"
+                cpu: "2000m"
             workingDir: /workspace/source
             volumeMounts:
               - name: source
@@ -190,22 +202,15 @@ spec:
               - name: COVERAGE_OUTPUT_DIR
                 value: /tmp/coverage-output
               - name: PUSH_COVERAGE_ARTIFACT
-                value: "true"
-              - name: COVERAGE_ARTIFACT_REF_FILE
-                value: /tmp/coverage-artifact-ref.txt
+                value: "false"
               - name: OC_LOGIN_COMMAND
                 valueFrom:
                   secretKeyRef:
                     name: integration-pipeline-credentials
                     key: oc-login-command
-              - name: QUAY_AUTH_SECRET
-                valueFrom:
-                  secretKeyRef:
-                    name: integration-pipeline-credentials
-                    key: quay-auth-secret
             script: |
               #!/bin/bash
-              set -eux
+              set -eu
               
               # Download and install oc binary
               echo "📥 Downloading oc binary..."
@@ -220,11 +225,6 @@ spec:
               # Login to OpenShift (needed for kubectl access)
               eval $OC_LOGIN_COMMAND
 
-              # Setup Docker config for quay.io authentication
-              mkdir -p ~/.docker
-              echo "$QUAY_AUTH_SECRET" > ~/.docker/config.json
-              echo "✅ Docker authentication configured for quay.io"
-
               # Download Go dependencies
               go mod download
 
@@ -235,275 +235,48 @@ spec:
               echo "✅ Coverage output directory: $COVERAGE_OUTPUT_DIR"
               
               # Run E2E tests
-              # The tests will:
-              # 1. Discover the pod using label selector
-              # 2. Port-forward to collect coverage
-              # 3. Run the E2E tests
-              # 4. Push coverage artifacts to quay.io
+              # These tests exercise the deployed instrumented application
+              # Coverage will be collected separately by the coverport-coverage task
               cd test
               
-              echo "📊 Running E2E tests with coverage collection..."
+              echo "🧪 Running E2E tests..."
               echo "   Namespace: $APP_NAMESPACE"
               echo "   App URL: $APP_URL"
-              echo "   Coverage Dir: $COVERAGE_OUTPUT_DIR"
               
-              # Run the tests
-              # Note: The test already knows to push to quay.io/psturc/coverage-artifacts
+              # Run the tests (no coverage collection needed here)
               go test -v ./...
               
               echo "✅ E2E tests completed successfully!"
-              
-              # List the coverage files that were generated
-              if [ -d "$COVERAGE_OUTPUT_DIR/e2e-tests" ]; then
-                echo "📁 Generated coverage files:"
-                ls -lh "$COVERAGE_OUTPUT_DIR/e2e-tests/"
-              fi
-              
-              # Save the coverage artifact reference to Tekton result
-              if [ -f "$COVERAGE_ARTIFACT_REF_FILE" ]; then
-                ARTIFACT_REF=$(cat "$COVERAGE_ARTIFACT_REF_FILE")
-                echo "📦 Coverage artifact reference: $ARTIFACT_REF"
-                echo -n "$ARTIFACT_REF" > /tekton/results/COVERAGE_ARTIFACT_REF
-              else
-                echo "⚠️  Coverage artifact reference file not found"
-                echo "   This is expected if OCI push was skipped or failed"
-                echo -n "not-available" > /tekton/results/COVERAGE_ARTIFACT_REF
-              fi
 
-    - name: process-coverage
+    - name: collect-and-upload-coverage
       runAfter:
         - run-e2e-tests
-      taskSpec:
-        volumes:
-          - name: workspace
-            emptyDir: {}
-        steps:
-          # Step 1: Extract coverage artifact and metadata
-          - name: extract-coverage-artifact
-            image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            env:
-              - name: COVERAGE_ARTIFACT_REF
-                value: $(tasks.run-e2e-tests.results.COVERAGE_ARTIFACT_REF)
-            script: |
-              #!/bin/bash
-              set -e
-              
-              if [ "$COVERAGE_ARTIFACT_REF" = "not-available" ]; then
-                echo "⚠️  No coverage artifact available, skipping processing"
-                exit 0
-              fi
-              
-              echo "=== Pulling coverage artifact with ORAS ==="
-              echo "Coverage artifact: $COVERAGE_ARTIFACT_REF"
-              
-              mkdir -p /workspace/coverage-raw
-              cd /workspace/coverage-raw
-              oras pull "$COVERAGE_ARTIFACT_REF"
-              
-              echo "=== Coverage artifact contents ==="
-              ls -la /workspace/coverage-raw/
-              
-              if [ ! -f /workspace/coverage-raw/metadata.json ]; then
-                echo "Error: metadata.json not found"
-                exit 1
-              fi
-              
-              echo "=== metadata.json ==="
-              cat /workspace/coverage-raw/metadata.json
-              
-              # Extract app image and save for next steps
-              APP_IMAGE=$(cat /workspace/coverage-raw/metadata.json | jq -r '.container.image')
-              echo "App image: $APP_IMAGE"
-              echo -n "$APP_IMAGE" > /workspace/app-image
-          
-          # Step 2: Extract git metadata from app image attestation
-          - name: extract-git-metadata
-            image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            env:
-              - name: COVERAGE_ARTIFACT_REF
-                value: $(tasks.run-e2e-tests.results.COVERAGE_ARTIFACT_REF)
-            script: |
-              #!/bin/bash
-              set -e
-              
-              if [ "$COVERAGE_ARTIFACT_REF" = "not-available" ]; then
-                echo "⚠️  Skipping (no coverage artifact)"
-                exit 0
-              fi
-              
-              APP_IMAGE=$(cat /workspace/app-image)
-              echo "=== Extracting Git metadata from: $APP_IMAGE ==="
-              
-              # Download attestation
-              cosign download attestation "$APP_IMAGE" > /workspace/attestation.json
-              
-              # Extract Konflux annotations
-              ANNOTATIONS=$(cat /workspace/attestation.json | \
-                jq -r '.payload | @base64d | fromjson | .predicate.buildConfig.tasks[0].invocation.environment.annotations')
-              
-              echo "=== Konflux annotations ==="
-              echo "$ANNOTATIONS" | jq .
-              
-              # Extract repo URL and commit SHA
-              REPO_URL=$(echo "$ANNOTATIONS" | jq -r '."pipelinesascode.tekton.dev/repo-url"')
-              COMMIT_SHA=$(echo "$ANNOTATIONS" | jq -r '."build.appstudio.redhat.com/commit_sha"')
-              
-              echo "Repo URL: $REPO_URL"
-              echo "Commit SHA: $COMMIT_SHA"
-              
-              if [ -z "$REPO_URL" ] || [ "$REPO_URL" = "null" ]; then
-                echo "Error: Could not extract repo URL"
-                exit 1
-              fi
-              
-              if [ -z "$COMMIT_SHA" ] || [ "$COMMIT_SHA" = "null" ]; then
-                echo "Error: Could not extract commit SHA"
-                exit 1
-              fi
-              
-              # Save for next steps
-              echo -n "$REPO_URL" > /workspace/repo-url
-              echo -n "$COMMIT_SHA" > /workspace/commit-sha
-          
-          # Step 3: Clone repository
-          - name: clone-repository
-            image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            env:
-              - name: COVERAGE_ARTIFACT_REF
-                value: $(tasks.run-e2e-tests.results.COVERAGE_ARTIFACT_REF)
-            script: |
-              #!/bin/bash
-              set -e
-              
-              if [ "$COVERAGE_ARTIFACT_REF" = "not-available" ]; then
-                echo "⚠️  Skipping (no coverage artifact)"
-                exit 0
-              fi
-              
-              REPO_URL=$(cat /workspace/repo-url)
-              COMMIT_SHA=$(cat /workspace/commit-sha)
-              
-              echo "=== Cloning repository ==="
-              echo "Repository: $REPO_URL"
-              echo "Commit: $COMMIT_SHA"
-              
-              cd /workspace
-              git clone "$REPO_URL" repo
-              cd repo
-              git checkout "$COMMIT_SHA"
-              
-              echo "=== Repository cloned ==="
-              ls -la
-              
-              if [ -f "go.mod" ]; then
-                echo "Go module: $(head -1 go.mod)"
-              fi
-          
-          # Step 4: Process and convert coverage
-          - name: process-coverage
-            image: golang:1.21
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            env:
-              - name: COVERAGE_ARTIFACT_REF
-                value: $(tasks.run-e2e-tests.results.COVERAGE_ARTIFACT_REF)
-            script: |
-              #!/bin/bash
-              set -e
-              
-              if [ "$COVERAGE_ARTIFACT_REF" = "not-available" ]; then
-                echo "⚠️  Skipping (no coverage artifact)"
-                exit 0
-              fi
-              
-              echo "=== Processing Go coverage data ==="
-              
-              cd /workspace/repo
-              
-              # Set GOCOVERDIR to the raw coverage location
-              export GOCOVERDIR=/workspace/coverage-raw
-              
-              echo "Coverage directory: $GOCOVERDIR"
-              ls -la $GOCOVERDIR/
-              
-              # Convert binary coverage to text format
-              echo "Converting coverage to text format..."
-              go tool covdata textfmt -i=$GOCOVERDIR -o=/workspace/coverage.out
-              
-              if [ ! -f /workspace/coverage.out ]; then
-                echo "Error: Failed to generate coverage.out"
-                exit 1
-              fi
-              
-              echo "=== Coverage file generated ==="
-              ls -lh /workspace/coverage.out
-              
-              # Show coverage percentage
-              COVERAGE_PCT=$(go tool cover -func=/workspace/coverage.out | grep total: | awk '{print $3}')
-              echo "Total coverage: $COVERAGE_PCT"
-          
-          # Step 5: Upload to Codecov
-          - name: upload-to-codecov
-            image: quay.io/konflux-ci/tekton-integration-catalog/utils:latest
-            volumeMounts:
-              - name: workspace
-                mountPath: /workspace
-            env:
-              - name: COVERAGE_ARTIFACT_REF
-                value: $(tasks.run-e2e-tests.results.COVERAGE_ARTIFACT_REF)
-              - name: CODECOV_TOKEN
-                valueFrom:
-                  secretKeyRef:
-                    name: integration-pipeline-credentials
-                    key: codecov-token
-                    optional: true
-            script: |
-              #!/bin/bash
-              set -e
-              
-              if [ "$COVERAGE_ARTIFACT_REF" = "not-available" ]; then
-                echo "⚠️  Skipping (no coverage artifact)"
-                exit 0
-              fi
-              
-              if [ -z "$CODECOV_TOKEN" ]; then
-                echo "⚠️  CODECOV_TOKEN not set, skipping upload"
-                echo "   Add codecov-token to integration-pipeline-credentials secret to enable"
-                exit 0
-              fi
-              
-              echo "=== Uploading to Codecov ==="
-              
-              cd /workspace/repo
-              COMMIT_SHA=$(cat /workspace/commit-sha)
-              
-              echo "Commit SHA: $COMMIT_SHA"
-              
-              # Download Codecov uploader
-              curl -Os https://cli.codecov.io/latest/linux/codecov
-              chmod +x codecov
-              
-              # Copy coverage file to repo directory
-              cp /workspace/coverage.out ./coverage.out
-              
-              echo "=== Running Codecov uploader ==="
-              ./codecov upload-coverage -t "$CODECOV_TOKEN" -f coverage.out --sha "$COMMIT_SHA" --disable-search --flag e2e-tests
-              
-              echo "=== Coverage uploaded successfully ==="
+      params:
+        - name: instrumented-images
+          value: $(tasks.test-metadata.results.container-image)
+        - name: cluster-access-secret-name
+          value: $(params.CLUSTER_ACCESS_SECRET)
+        - name: test-name
+          value: e2e-tests
+        - name: oci-container
+          value: quay.io/psturc/coverage-artifacts:$(context.pipelineRun.name)
+        - name: codecov-flags
+          value: e2e-tests
+        - name: credentials-secret-name
+          value: $(params.COVERPORT_SECRET)
+      taskRef:
+        resolver: git
+        params:
+          - name: url
+            value: https://github.com/psturc/tekton-integration-catalog.git
+          - name: revision
+            value: KFLUXDP-591
+          - name: pathInRepo
+            value: tasks/coverport-coverage/0.1/coverport-coverage.yaml
 
     - name: cleanup
       runAfter:
-        - process-coverage
+        - collect-and-upload-coverage
       taskSpec:
         steps:
           - name: cleanup-namespace
@@ -518,7 +291,7 @@ spec:
                     key: oc-login-command
             script: |
               #!/bin/sh
-              set -eux
+              set -eu
               
               # Login to OpenShift
               eval $OC_LOGIN_COMMAND
